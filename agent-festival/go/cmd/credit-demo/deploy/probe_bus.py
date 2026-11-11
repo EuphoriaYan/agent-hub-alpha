@@ -6,7 +6,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
-from smoke_bus import CACHE, PROJECT, Planner, TEAM, redact, request
+from smoke_bus import CACHE, PROJECT, Planner, TEAM, redact, request, environment_record
 import demo
 
 
@@ -36,7 +36,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rdc-outage", action="store_true", help="Temporarily stop this project's RDC; always restore it")
     args = parser.parse_args()
-    evidence = {"scenario": "protocol-admission", "started_at": time.time(), "cases": {}}
+    evidence = {"scenario": "protocol-admission", "started_at": time.time(), "cases": {}, "environment": environment_record()}
     target = CACHE / "evidence/agent-bus" / f"protocol-admission-{int(time.time())}.json"
     try:
         for agent in ("credit-material", "credit-analysis", "credit-writer"):

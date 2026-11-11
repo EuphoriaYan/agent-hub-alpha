@@ -7,6 +7,7 @@ No live lending operation is included in the test graph.
 from __future__ import annotations
 import argparse
 import http.cookiejar
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,17 @@ from demo import CACHE
 
 BASE = os.environ.get("BUS_TEST_BASE", "http://127.0.0.1:5191")
 PROJECT = os.environ.get("BUS_TEST_PROJECT", "agent-hub-issue16")
+
+
+def environment_record():
+    root = Path(__file__).resolve().parents[5]
+    commit = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+    ids = subprocess.check_output(["docker", "ps", "-aq", "--filter", "label=com.docker.compose.project=" + PROJECT], text=True).split()
+    containers = json.loads(subprocess.check_output(["docker", "inspect", *ids], text=True)) if ids else []
+    return {"project": PROJECT, "base": BASE, "source_commit": commit,
+            "images": {x["Name"]: x["Image"] for x in containers},
+            "config_sha256": {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+                              for name in ("compose.yaml", "compose.bus.yaml", "compose.bus-test.yaml", "bus/rdc.yml", "sources.lock.json")}}
 TEAM = [
     {"id": "intake", "expert": "intake", "role": "资料", "task": "使用 get_application 核对本案件申请材料"},
     {"id": "financial", "expert": "financial-analyst", "role": "财务", "task": "使用 get_financials 分析本案件财务数据，明确资产单位", "depends_on": ["intake"]},
@@ -311,7 +323,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("scenario", choices=["normal", "host-kill", "disconnect", "late", "gateway-restart", "runtime-restart", "storage-failure"], default="normal", nargs="?")
     args = parser.parse_args()
-    evidence = {"scenario": args.scenario, "started_at": time.time(), "scope": "Agent Bus integration on synthetic credit data; W06 annual-report checks excluded", "snapshots": []}
+    evidence = {"scenario": args.scenario, "started_at": time.time(), "scope": "Agent Bus integration on synthetic credit data; W06 annual-report checks excluded", "snapshots": [], "environment": environment_record()}
     directory = CACHE / "evidence" / "agent-bus"
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"{args.scenario}-{int(time.time())}.json"
