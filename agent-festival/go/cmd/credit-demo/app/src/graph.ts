@@ -5,6 +5,8 @@
 // each popping in at the end of the edges that feed it. The black box opens
 // into a Loop Forest group whose branches fork out of it one by one.
 import { css } from "./style";
+import { associationText, busOverviewHTML, executionDetailHTML, executionLabel } from "./bus-detail";
+import type { BusSummary, ExecutionBinding, RemoteExecution } from "./bus-detail";
 
 export interface Branch {
   goal: string; status: string; title: string; relation?: string; activity?: string; finding?: string; tone?: string; retried?: boolean;
@@ -13,7 +15,7 @@ export interface RunIf { step: string; contains: string; negate?: boolean }
 export interface GraphNode {
   id: string; name: string; kind: string; role?: string; task: string; deps?: string[]; when?: RunIf;
   effect?: string; reads?: string[]; contract?: string; denied?: string; status?: string; activity?: string; output?: string; branches?: Branch[];
-  remote?: { agent_id: string; task_id: string; status: string; model_calls: number; artifact_id: string };
+  remote?: RemoteExecution; execution?: ExecutionBinding;
 }
 export interface Check { name: string; ok: boolean; detail: string; items?: string[] }
 export interface Graph {
@@ -21,7 +23,7 @@ export interface Graph {
   ok: boolean; problems?: string[]; hash: string; approve?: string; confirm?: string; superseded?: number;
   run?: { id: string; status: string; decision?: string; receipt?: string; leases: number; stalled?: boolean; url: string };
   verify?: { ok: boolean; summary: string; checks: Check[] };
-  live?: string;
+  live?: string; bus?: BusSummary;
 }
 export interface Options {
   // Approve in the card: resolves to an error message, or undefined when approved.
@@ -92,6 +94,9 @@ export class GraphView {
   private readonly el: HTMLDivElement;
   private readonly head: HTMLDivElement;
   private readonly canvas: HTMLDivElement;
+  private readonly overview: HTMLDivElement;
+  private busSig = "";
+  private detailSig = "";
   private readonly stage: HTMLDivElement;
   private readonly svg: SVGSVGElement;
   private readonly foot: HTMLDivElement;
@@ -120,10 +125,11 @@ export class GraphView {
     ensureStyle(root.ownerDocument);
     this.el = document.createElement("div");
     this.el.className = "cg";
-    this.el.innerHTML = `<div class="cg-head"></div><div class="cg-canvas"><div class="cg-stage"><svg class="cg-edges"><defs>${EDGE_STATES.map((s) =>
+    this.el.innerHTML = `<div class="cg-head"></div><div class="cg-bus-overview"></div><div class="cg-canvas"><div class="cg-stage"><svg class="cg-edges"><defs>${EDGE_STATES.map((s) =>
       `<marker id="${this.id}-ar-${s}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5L8.5 5L1 8.5" fill="none" stroke="${EDGE_COLORS[s]}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker>`).join("")}</defs></svg></div><div class="cg-wait"><i></i><i></i><i></i></div></div><div class="cg-foot"></div>`;
     root.replaceChildren(this.el);
     this.head = this.el.querySelector(".cg-head")!;
+    this.overview = this.el.querySelector(".cg-bus-overview")!;
     this.canvas = this.el.querySelector(".cg-canvas")!;
     this.stage = this.el.querySelector(".cg-stage")!;
     this.svg = this.el.querySelector("svg")!;
@@ -136,11 +142,19 @@ export class GraphView {
       }
     }).observe(this.canvas);
     this.el.addEventListener("click", (e) => {
-      const slot = (e.target as HTMLElement).closest<HTMLElement>(".cg-slot");
-      if (slot && !(e.target as HTMLElement).closest(".cg-pop")) this.togglePop(slot.dataset.id!);
-      else if (!(e.target as HTMLElement).closest(".cg-pop")) this.closePop();
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-detail-close]")) { this.closePop(true); return; }
+      if (target.closest("[data-copy-evidence]")) { void this.copyEvidence(); return; }
+      const inspect = target.closest<HTMLElement>("[data-inspect], .cg-slot");
+      if (inspect) this.togglePop(inspect.dataset.inspect ?? inspect.dataset.id!);
     });
-    root.ownerDocument.addEventListener("keydown", (e) => { if (e.key === "Escape") this.closePop(); });
+    this.el.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { this.closePop(true); return; }
+      const slot = (e.target as HTMLElement).closest<HTMLElement>(".cg-slot");
+      if (slot && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault(); this.togglePop(slot.dataset.id!);
+      }
+    });
   }
 
   current() { return this.g; }
@@ -151,6 +165,14 @@ export class GraphView {
     this.el.classList.toggle("m-plan", !g.run);
     this.el.classList.toggle("m-stalled", !!g.run?.stalled);
     this.renderHead(g);
+    const busHTML = busOverviewHTML(g);
+    if (busHTML !== this.busSig) {
+      const open = this.overview.querySelector("details")?.open;
+      this.busSig = busHTML;
+      this.overview.innerHTML = busHTML;
+      const details = this.overview.querySelector("details");
+      if (details) details.open = !!open;
+    }
     const layerOf = new Map<string, number>();
     g.layers.forEach((l, i) => l.forEach((id) => layerOf.set(id, i)));
 
@@ -248,9 +270,13 @@ export class GraphView {
     const more = (n.branches?.length ?? 0) - branches.length;
     const group = !!g.run && n.kind === "blackbox" && branches.length > 0;
     const activity = ["running", "waiting", "unknown"].includes(status) ? n.activity ?? "" : "";
-    const sig = JSON.stringify([n.name, n.task, status, denied, result, activity, more,
+    const sig = JSON.stringify([n.name, n.task, status, denied, result, activity, more, executionLabel(n),
       branches.map((b) => [b.status, b.title, b.activity, b.finding, b.retried])]);
     v.wide = group;
+    v.el.tabIndex = 0;
+    v.el.setAttribute("role", "button");
+    v.el.setAttribute("aria-label", `${n.name}，${executionLabel(n)}，查看执行详情`);
+    v.el.setAttribute("aria-expanded", String(this.pop?.dataset.id === n.id));
     v.el.className = `cg-node k-${n.kind} s-${status}${denied ? " denied" : ""}${group ? " group" : ""}${v.el.dataset.enter ? " enter" : ""}`;
     if (sig === v.sig) return;
     const changedStatus = v.sig !== "" && JSON.parse(v.sig)[2] !== status;
@@ -284,7 +310,7 @@ export class GraphView {
 
     const res = (result ? `<div class="cg-res ${result[0]}">${esc(result[1])}</div>` : "")
       + (activity ? `<div class="cg-act" title="${esc(activity)}"><i></i><span>${esc(activity)}</span></div>` : "");
-    const card = `<div class="cg-av">${esc([...n.name][0] ?? "?")}</div><div class="cg-body"><div class="cg-name">${esc(n.name)}</div><div class="cg-task">${esc(n.task)}</div>${res}</div>`;
+    const card = `<div class="cg-av">${esc([...n.name][0] ?? "?")}</div><div class="cg-body"><div class="cg-name">${esc(n.name)}</div><div class="cg-execution">${esc(executionLabel(n))}</div><div class="cg-task">${esc(n.task)}</div>${res}</div>`;
 
     let html: string;
     if (group) {
@@ -593,37 +619,62 @@ export class GraphView {
     setTimeout(() => gate.remove(), 260);
   }
 
-  // ---------- detail popover ----------
-
+  // Inline evidence stays readable in both the embedded card and the run page.
   private togglePop(id: string, refresh = false) {
-    if (this.pop && this.pop.dataset.id === id && !refresh) { this.closePop(); return; }
+    if (this.pop?.dataset.id === id && !refresh) { this.closePop(true); return; }
     const n = this.g?.nodes.find((x) => x.id === id);
-    const v = this.nodes.get(id);
-    if (!n || !v) { this.closePop(); return; }
+    if (!n) { this.closePop(); return; }
+    const sig = JSON.stringify(n);
+    if (refresh && sig === this.detailSig) return;
+    this.detailSig = sig;
     const pop = this.pop ?? document.createElement("div");
-    const fresh = !this.pop;
-    pop.className = "cg-pop";
+    const opened = refresh ? [...pop.querySelectorAll<HTMLDetailsElement>("details[open]")].map(d => d.dataset.detailSection) : [];
+    const scroll = refresh ? pop.querySelector(".cg-detail-body")?.scrollTop ?? 0 : 0;
+    const focused = refresh && pop.contains(pop.ownerDocument.activeElement) ? pop.ownerDocument.activeElement as HTMLElement : undefined;
+    const section = focused?.closest<HTMLElement>("[data-detail-section]")?.dataset.detailSection;
+    const copyFocused = focused?.hasAttribute("data-copy-evidence");
+    const closeFocused = focused?.hasAttribute("data-detail-close");
+    pop.className = "cg-detail";
     pop.dataset.id = id;
-    const role = n.role && n.role !== n.name ? `<div class="role">${esc(n.role)}</div>` : "";
-    pop.innerHTML = `<h4>${esc(n.name)}</h4>${role}<p>${esc(n.task)}</p>${
-      n.denied && !this.g!.ok ? `<p style="color:var(--red)">${esc(n.denied)}</p>` : ""}${
-      n.reads?.length ? `<div class="k">读取</div>${n.reads.map((r) => `<code>${esc(r)}</code>`).join("")}` : ""}${
-      n.contract ? `<div class="k">契约</div><code>${esc(n.contract)}</code>` : ""}${
-      n.remote ? `<div class="k">远端执行</div><code>${esc(n.remote.agent_id)}</code><p>模型调用 ${n.remote.model_calls} 次</p>${n.remote.task_id ? `<code>${esc(n.remote.task_id)}</code>` : ""}` : ""}${
-      n.output ? `<div class="k">产物</div><div class="out">${esc(n.output)}</div>` : ""}`;
-    if (fresh) { this.el.appendChild(pop); this.pop = pop; }
-    else if (!refresh) { pop.style.animation = "none"; void pop.offsetWidth; pop.style.animation = ""; }
-    const r = v.el.getBoundingClientRect(), root = this.el.getBoundingClientRect();
-    const left = Math.min(Math.max(8, r.left - root.left), root.width - pop.offsetWidth - 8);
-    let top = r.bottom - root.top + 8;
-    if (top + pop.offsetHeight > root.height - 4) top = Math.max(4, r.top - root.top - pop.offsetHeight - 8);
-    pop.style.left = `${left}px`;
-    pop.style.top = `${top}px`;
+    pop.setAttribute("role", "region");
+    pop.setAttribute("aria-label", `${n.name}执行详情`);
+    pop.innerHTML = executionDetailHTML(n);
+    if (!this.pop) { this.el.appendChild(pop); this.pop = pop; }
+    pop.querySelectorAll<HTMLDetailsElement>("details").forEach(d => { d.open = opened.includes(d.dataset.detailSection); });
+    pop.querySelector(".cg-detail-body")!.scrollTop = scroll;
+    if (section) [...pop.querySelectorAll<HTMLElement>("[data-detail-section]")].find(d => d.dataset.detailSection === section)?.querySelector("summary")?.focus({ preventScroll: true });
+    if (copyFocused) pop.querySelector<HTMLButtonElement>("[data-copy-evidence]")?.focus({ preventScroll: true });
+    if (closeFocused) pop.querySelector<HTMLButtonElement>("[data-detail-close]")?.focus({ preventScroll: true });
+    for (const [nodeID, v] of this.nodes) v.el.setAttribute("aria-expanded", String(nodeID === id));
+    if (!refresh) {
+      pop.querySelector<HTMLElement>("h4")?.focus({ preventScroll: true });
+      pop.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   }
 
-  private closePop() {
+  private async copyEvidence() {
+    const panel = this.pop;
+    const n = this.g?.nodes.find(n => n.id === panel?.dataset.id);
+    if (!n || !panel) return;
+    const status = panel.querySelector<HTMLElement>("[data-copy-status]");
+    try {
+      await navigator.clipboard.writeText(associationText(n));
+      if (status) status.textContent = "已复制";
+    } catch {
+      if (status) status.textContent = "浏览器未允许复制，请展开关联标识手动复制。";
+    }
+  }
+
+  private closePop(focus = false) {
+    const id = this.pop?.dataset.id;
     this.pop?.remove();
     this.pop = undefined;
+    this.detailSig = "";
+    for (const v of this.nodes.values()) v.el.setAttribute("aria-expanded", "false");
+    if (focus && id) {
+      const target = this.nodes.get(id)?.el ?? [...this.overview.querySelectorAll<HTMLButtonElement>("[data-inspect]")].find(b => b.dataset.inspect === id);
+      target?.focus({ preventScroll: true });
+    }
   }
 }
 

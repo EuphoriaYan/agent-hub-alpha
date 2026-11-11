@@ -27,7 +27,7 @@ func busFixture(t *testing.T) (*Service, CallCommand, *atomic.Int64) {
 			v = "2.0.0"
 		}
 		if strings.HasSuffix(r.URL.Path, "/instances") {
-			_ = json.NewEncoder(w).Encode(map[string]any{"instances": []map[string]any{{"health": "ONLINE", "contractVersion": "1.0", "capabilityVersion": v}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"instances": []map[string]any{{"instanceId": "fixture-1", "routeHandle": "private-route", "endpoint": "http://private-runtime", "health": "ONLINE", "contractVersion": "1.0", "capabilityVersion": v}}})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"name": id, "version": v, "skills": []string{"controlled"}})

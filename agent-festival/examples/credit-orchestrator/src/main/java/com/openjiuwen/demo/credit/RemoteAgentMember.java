@@ -6,6 +6,8 @@ import com.openjiuwen.agents.reactrails.loopforest.execution.SubAgentExecutor;
 import java.net.URI;
 import java.net.http.*;
 import java.time.Duration;
+import java.time.Instant;
+import java.io.IOException;
 import java.util.*;
 
 /** Agent Bus A2A 1.0 JSON-RPC adapter; Graph remains the only scheduler. */
@@ -13,6 +15,7 @@ final class RemoteAgentMember implements SubAgentExecutor {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final GoClient go;
     private final String run,token,step,gateway,credential;
+    private Map<String,Object> observation;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     RemoteAgentMember(GoClient go,String run,String token,String step,Map<String,String> env) {
         this.go=go; this.run=run; this.token=token; this.step=step;
@@ -31,6 +34,7 @@ final class RemoteAgentMember implements SubAgentExecutor {
         var body=identity(call);
         body.put("remote_task_id",task);body.put("context_id",call.path("context_id").asText());
         body.put("status",state);body.put("reason",reason);body.put("sequence",seq);
+        if (observation != null) body.put("gateway", new LinkedHashMap<>(observation));
         go.post("/exec/call/update",body,15);
     }
     private JsonNode rpc(String method,String id,Map<String,Object> params) throws Exception {
@@ -38,17 +42,38 @@ final class RemoteAgentMember implements SubAgentExecutor {
             .timeout(Duration.ofSeconds(30)).header("Content-Type","application/json")
             .header("Authorization","Bearer "+credential)
             .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(Map.of("jsonrpc","2.0","id",id,"method",method,"params",params)))).build();
-        var response=http.send(request,HttpResponse.BodyHandlers.ofString());
-        JsonNode body=JSON.readTree(response.body());
-        if (response.statusCode()!=200 || body.has("error")) {
-            String code=body.path("error").path("data").path("code").asText(body.path("code").asText("A2A_ERROR"));
-            if (method.equals("SendMessage") && Set.of("AUTH_MISSING","AUTH_INVALID","TENANT_UNRESOLVED","VALIDATION_FAILED","ROUTE_NO_CANDIDATES","RDC_UNAVAILABLE","ROUTE_RESOLVE_FAILED").contains(code))
-                throw new RemoteFailed("调用被拒绝："+code);
-            throw new IllegalStateException("Gateway HTTP "+response.statusCode()+" "+code);
+        observation = new LinkedHashMap<>();
+        observation.put("rpc_id", id);
+        observation.put("method", method);
+        observation.put("started_at", Instant.now().toString());
+        observation.put("outcome", "invalid_response");
+        observation.put("error_code", "INVALID_A2A_RESPONSE");
+        try {
+            var response=http.send(request,HttpResponse.BodyHandlers.ofString());
+            observation.put("http_status", response.statusCode());
+            JsonNode body=JSON.readTree(response.body());
+            if (response.statusCode()!=200 || body.has("error")) {
+                String code=body.path("error").path("data").path("code").asText(body.path("code").asText("A2A_ERROR"));
+                if (!code.matches("[A-Z][A-Z0-9_]{0,63}")) code="A2A_ERROR";
+                observation.put("outcome", response.statusCode()==200 ? "protocol_error" : "http_error");
+                observation.put("error_code", code);
+                if (method.equals("SendMessage") && Set.of("AUTH_MISSING","AUTH_INVALID","TENANT_UNRESOLVED","VALIDATION_FAILED","ROUTE_NO_CANDIDATES","RDC_UNAVAILABLE","ROUTE_RESOLVE_FAILED").contains(code))
+                    throw new RemoteFailed("调用被拒绝："+code);
+                throw new IllegalStateException("Gateway HTTP "+response.statusCode()+" "+code);
+            }
+            if (!body.has("result")) throw new IllegalStateException("Missing A2A result");
+            return body.path("result").has("task")?body.path("result").path("task"):body.path("result");
+        } catch (IOException | InterruptedException e) {
+            if (!observation.containsKey("http_status")) {
+                observation.put("outcome", "transport_error");
+                observation.put("error_code", e instanceof HttpTimeoutException ? "GATEWAY_TIMEOUT" : "GATEWAY_IO_ERROR");
+            }
+            throw e;
+        } finally {
+            observation.put("finished_at", Instant.now().toString());
         }
-        if (!body.has("result")) throw new IllegalStateException("Missing A2A result");
-        return body.path("result").has("task")?body.path("result").path("task"):body.path("result");
     }
+
     @Override public String execute(String userInput,String subGoal) {
         var begin=base();begin.put("input",userInput==null?"":userInput);begin.put("goal",subGoal==null?"":subGoal);
         JsonNode decision=go.post("/exec/call/begin",begin,30);
@@ -76,9 +101,13 @@ final class RemoteAgentMember implements SubAgentExecutor {
             while (true) {
                 String received=task.path("id").asText();
                 if (received.isBlank() || (!taskID.isBlank()&&!received.equals(taskID))) throw new IllegalStateException("Remote task identity mismatch");
-                taskID=received;
                 if (!task.path("contextId").asText().equals(call.path("context_id").asText())) throw new IllegalStateException("Remote context mismatch");
+                taskID=received;
                 String state=task.path("status").path("state").asText();
+                if (!Set.of("TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED", "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_AUTH_REQUIRED").contains(state))
+                    throw new IllegalStateException("Unrecognized remote task state");
+                observation.put("outcome", "task_received");
+                observation.remove("error_code");
                 update(call,taskID,"waiting","专业 Agent 执行中，查询原任务",++seq);
                 if (state.equals("TASK_STATE_COMPLETED")) {
                     StringBuilder text=new StringBuilder();

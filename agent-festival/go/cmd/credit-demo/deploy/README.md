@@ -149,3 +149,22 @@ BUS_TEST_PROJECT=agent-hub-issue16-fresh BUS_TEST_BASE=http://127.0.0.1:5291 pyt
 本次实施前备份位于 `~/.cache/agent-hub-alpha/issue16/backups/20261111-184444/`，包含完整工作区、差异、原 `credit-data/` 与镜像 manifest；基线提交为 `5051d3a`。回退原型时先备份当前三个卷并停止当前项目，在单独 worktree 检出基线，用基线镜像和备份数据启动，省略 `--bus`；保留现有总线卷以便返回本分支。不能只切代码而继续改写同一个新格式结果卷。
 
 新增组件实测稳态约 1 GiB（3 个专业 Runtime、RDC、Gateway、数据库合计，详见证据 `resources.json`）。Compose 分别限制 420/420/420/420/320/192 MiB；宿主 512 MiB。此数值不包含 WorkSwarm、Go、其他机器服务或构建峰值；应为构建和并行任务额外预留内存。
+
+## 在页面核对 Agent Bus 与 RDC
+
+打开运行页，展开图卡顶部的“调用清单”或点击专业节点。详情显示派发前 RDC 快照、Gateway 请求及有效回执、Agent 开始/模型尝试、正式结果。关联 ID 和摘要可展开、复制；列表可检查尚未开始的节点。确认页只显示能力绑定，用户批准后才有调用记录。
+
+RDC 候选不等于实际执行实例，当前后者显示“未采集”；旧任务缺少的新观测也显示“未采集”。健康值带历史查询时间，HTTP 200 的协议错误不会显示成功。Gateway 观测来源是 Java 调用宿主；模型尝试数不是供应商账单。结果复用展示原调用证据，不表示重新派发。
+
+新增页面数据验收（真实模型、模拟案件，无银行操作；生成一条执行和一份未批准计划）：
+
+```sh
+python3 agent-festival/go/cmd/credit-demo/deploy/smoke_bus_ui.py
+# 前端语义与类型检查，在 app 目录安装锁定依赖后运行：
+cd agent-festival/go/cmd/credit-demo/app
+npm ci
+npm run check
+npm test
+```
+
+完整结果和体验样例见[执行结果的页面补充](../../../../docs/issue16-agent-bus-results.md#页面调用证据补充2026-11-11)。

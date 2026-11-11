@@ -15,40 +15,42 @@ import (
 // WorkSwarm and the confirm and run pages all draw from it, so what the user
 // reviews, approves and watches is the same picture.
 type Graph struct {
-	Plan       string      `json:"plan"`
-	Version    int         `json:"version"`
-	Case       string      `json:"case"`
-	Goal       string      `json:"goal"`
-	Layers     [][]string  `json:"layers"`
-	Nodes      []GraphNode `json:"nodes"`
-	OK         bool        `json:"ok"` // precheck passed
-	Problems   []string    `json:"problems,omitempty"`
-	Hash       string      `json:"hash"`                 // what an approval binds to
-	Approve    string      `json:"approve,omitempty"`    // approval endpoint, while awaiting approval
-	Confirm    string      `json:"confirm,omitempty"`    // confirm page, while awaiting approval
-	Superseded int         `json:"superseded,omitempty"` // newer version that replaced this one
-	Run        *GraphRun   `json:"run,omitempty"`
-	Verify     *Report     `json:"verify,omitempty"`
-	Live       string      `json:"live,omitempty"` // poll this while something can still change
+	Plan       string           `json:"plan"`
+	Version    int              `json:"version"`
+	Case       string           `json:"case"`
+	Goal       string           `json:"goal"`
+	Layers     [][]string       `json:"layers"`
+	Nodes      []GraphNode      `json:"nodes"`
+	OK         bool             `json:"ok"` // precheck passed
+	Problems   []string         `json:"problems,omitempty"`
+	Hash       string           `json:"hash"`                 // what an approval binds to
+	Approve    string           `json:"approve,omitempty"`    // approval endpoint, while awaiting approval
+	Confirm    string           `json:"confirm,omitempty"`    // confirm page, while awaiting approval
+	Superseded int              `json:"superseded,omitempty"` // newer version that replaced this one
+	Run        *GraphRun        `json:"run,omitempty"`
+	Verify     *Report          `json:"verify,omitempty"`
+	Live       string           `json:"live,omitempty"` // poll this while something can still change
+	Bus        *GraphBusSummary `json:"bus,omitempty"`
 }
 
 type GraphNode struct {
-	ID       string         `json:"id"`
-	Name     string         `json:"name"`
-	Kind     string         `json:"kind"` // investigate blackbox judge write effect
-	Role     string         `json:"role,omitempty"`
-	Task     string         `json:"task"`
-	Deps     []string       `json:"deps,omitempty"`
-	When     *RunIf         `json:"when,omitempty"`
-	Effect   string         `json:"effect,omitempty"`
-	Reads    []string       `json:"reads,omitempty"`
-	Contract string         `json:"contract,omitempty"`
-	Denied   string         `json:"denied,omitempty"`
-	Status   string         `json:"status,omitempty"` // pending running done reused skipped failed
-	Activity string         `json:"activity,omitempty"`
-	Output   string         `json:"output,omitempty"`
-	Branches []GraphBranch  `json:"branches,omitempty"`
-	Remote   map[string]any `json:"remote,omitempty"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Kind      string         `json:"kind"` // investigate blackbox judge write effect
+	Role      string         `json:"role,omitempty"`
+	Task      string         `json:"task"`
+	Deps      []string       `json:"deps,omitempty"`
+	When      *RunIf         `json:"when,omitempty"`
+	Effect    string         `json:"effect,omitempty"`
+	Reads     []string       `json:"reads,omitempty"`
+	Contract  string         `json:"contract,omitempty"`
+	Denied    string         `json:"denied,omitempty"`
+	Status    string         `json:"status,omitempty"` // pending running done reused skipped failed
+	Activity  string         `json:"activity,omitempty"`
+	Output    string         `json:"output,omitempty"`
+	Branches  []GraphBranch  `json:"branches,omitempty"`
+	Remote    map[string]any `json:"remote,omitempty"`
+	Execution GraphExecution `json:"execution"`
 }
 
 // GraphBranch is one sub-goal a Loop Forest step forked, as the graph draws it.
@@ -97,6 +99,13 @@ func (s *Service) graph(p *Plan, withVerify bool) (*Graph, error) {
 		e := expertByID(a.Expert)
 		n := GraphNode{ID: st.ID, Name: e.Name, Kind: e.Kind, Role: a.Role, Task: a.Task, Deps: st.DependsOn, When: st.When,
 			Contract: clip(strings.TrimPrefix(s.cat.Hashes[e.ID], "sha256:"), 12)}
+		n.Execution.Kind = "host"
+		if e.Kind == "blackbox" {
+			n.Execution.Kind = "loop_forest"
+		}
+		if binding, ok := p.BusBindings[st.ID]; ok {
+			n.Execution = GraphExecution{Kind: "agent_bus", PathMode: "DIRECT", Binding: &binding}
+		}
 		if e.effectLevel != "none" {
 			n.Effect = e.effectLevel
 		}
@@ -118,10 +127,7 @@ func (s *Service) graph(p *Plan, withVerify bool) (*Graph, error) {
 					n.Activity = rec.Activity
 				}
 				if c := rec.Call; c != nil {
-					n.Remote = map[string]any{"agent_id": c.Binding.AgentID, "node_execution_id": c.NodeExecutionID, "attempt": c.Attempt,
-						"request_id": c.RequestID, "task_id": c.RemoteTaskID, "context_id": c.ContextID, "status": c.Status,
-						"input_digest": c.InputDigest, "artifact_id": c.ArtifactID, "artifact_digest": c.ArtifactDigest,
-						"model_calls": len(c.ModelEvents), "agent_started_at": c.AgentStartedAt, "updated_at": c.UpdatedAt}
+					n.Remote = remoteView(rec)
 				}
 				n.Branches = graphBranches(p.CaseID, rec.Branches)
 				if rec.Status == "running" && len(n.Branches) > 0 {
@@ -134,6 +140,7 @@ func (s *Service) graph(p *Plan, withVerify bool) (*Graph, error) {
 		}
 		g.Nodes = append(g.Nodes, n)
 	}
+	g.Bus = busSummary(g.Nodes)
 	if run != nil {
 		g.Run = &GraphRun{ID: run.ID, Status: run.Status, Receipt: run.ReceiptOf, Leases: len(run.Leases),
 			URL: fmt.Sprintf("%s/ui/run/%s", s.cfg.PublicURL, run.ID)}

@@ -228,16 +228,65 @@ export const css = String.raw`
 .cg-check.no b { background: var(--red); }
 .cg-check span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* detail popover */
-.cg-pop { position: absolute; z-index: 5; width: 300px; background: #fff; border: 1px solid #e3e6eb; border-radius: 12px; padding: 12px 14px;
-  box-shadow: 0 12px 32px rgba(16,24,40,.14); font-size: 12px; animation: cg-popin .22s cubic-bezier(.2,.8,.2,1) both; }
-.cg-pop h4 { margin: 0 0 2px; font-size: 13.5px; }
-.cg-pop .role { color: var(--mute); margin-bottom: 8px; }
-.cg-pop p { margin: 0 0 8px; color: #374151; }
-.cg-pop .k { color: var(--faint); font-size: 11px; margin: 8px 0 3px; }
-.cg-pop code { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; background: #f3f4f6; border-radius: 4px; padding: 1px 5px;
-  display: inline-block; margin: 0 4px 3px 0; }
-.cg-pop .out { white-space: pre-wrap; background: #f8f9fb; border-radius: 8px; padding: 7px 9px; max-height: 120px; overflow: auto; color: #374151; }
+/* Evidence overview and inline detail panel */
+.cg-execution { color: #526477; font-size: 9px; margin: 3px 0; white-space: nowrap; }
+.cg-node:focus-visible, .cg button:focus-visible, .cg summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.cg-bus-overview:empty { display: none; }
+.cg-bus-list { border-top: 1px solid var(--line); background: #f7f9fc; }
+.cg-bus-list > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 11px 16px; cursor: pointer; color: #526477; font-size: 12px; list-style: none; }
+.cg-bus-list > summary::-webkit-details-marker { display: none; }
+.cg-bus-title { color: var(--ink); font-weight: 600; }
+.cg-bus-title b { margin-left: 5px; font-size: 10px; padding: 2px 5px; border: 1px solid #cbd5e1; border-radius: 4px; }
+.cg-bus-counts { flex: 1; }
+.cg-bus-expand { color: var(--blue); }
+.cg-bus-expand::after { content: " ＋"; }
+.cg-bus-list[open] .cg-bus-expand::after { content: " −"; }
+.cg-call-list { margin: 0 16px; border-top: 1px solid var(--line); }
+.cg-call-list button { width: 100%; display: grid; grid-template-columns: minmax(80px,1fr) minmax(110px,1fr) 90px 16px; gap: 8px; text-align: left; padding: 9px 0; background: none; border: 0; border-bottom: 1px solid var(--line); font: inherit; color: var(--ink); cursor: pointer; }
+.cg-call-list button:hover { color: var(--blue); }
+.cg-call-list code { color: var(--mute); overflow-wrap: anywhere; }
+.cg-bus-list > .cg-proof-note { margin: 9px 16px; }
+.cg-detail { border-top: 1px solid #cbd5e1; background: #fff; }
+.cg-detail-head { padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #f8fafc; }
+.cg-detail-head h4 { margin: 0; font-size: 15px; }
+.cg-detail-head h4:focus { outline: none; }
+.cg-detail-head p { margin: 4px 0 0; color: var(--mute); font-size: 12px; }
+.cg-detail button { border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; background: #fff; font: inherit; cursor: pointer; color: var(--ink); }
+.cg-detail-close { flex-shrink: 0; }
+.cg-detail-body { padding: 0 16px 16px; max-height: 570px; overflow-y: auto; overscroll-behavior: contain; }
+.cg-detail-task { color: #475569; margin: 12px 0; }
+.cg-detail-notice { padding: 9px 12px; border-left: 3px solid var(--blue); background: #eff6ff; overflow-wrap: anywhere; }
+.cg-detail-notice.warn { border-color: var(--amber); background: #fff7ed; }
+.cg-proof-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.cg-proof { padding: 12px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; }
+.cg-proof > header { padding: 0; border: 0; background: none; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.cg-proof h5 { margin: 0; font-size: 13px; flex: 1; }
+.cg-proof-number { color: var(--mute); font-size: 11px; background: #f1f5f9; border-radius: 50%; width: 20px; height: 20px; display: grid; place-items: center; }
+.cg-proof-state { font-size: 11px; }
+.cg-proof-state.ok { color: #15803d; }.cg-proof-state.warn { color: #b45309; }.cg-proof-state.active { color: var(--blue); }.cg-proof-state.muted { color: var(--mute); }
+.cg-detail dl { margin: 10px 0; }
+.cg-fact { display: grid; grid-template-columns: 95px minmax(0,1fr); gap: 8px; margin: 7px 0; font-size: 12px; }
+.cg-fact dt { color: var(--mute); }.cg-fact dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cg-proof-note { color: var(--mute); font-size: 11px; line-height: 1.6; }
+.cg-detail details { margin-top: 10px; }
+.cg-detail summary { cursor: pointer; color: #475569; font-size: 12px; padding: 4px 0; }
+.cg-candidates { list-style: none; padding: 0; margin: 8px 0; }
+.cg-candidates li { display: flex; flex-direction: column; gap: 3px; padding: 6px 0; font-size: 12px; overflow-wrap: anywhere; }
+.cg-candidates span { color: var(--mute); font-size: 11px; }
+.cg-proof-error { color: #b45309; overflow-wrap: anywhere; }
+.cg-identifiers { border-top: 1px solid var(--line); padding-top: 8px; }
+.cg-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; font-size: 12px; }
+.cg-detail-actions .cg-proof-note { margin-left: auto; }
+.cg-detail-output { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: #f8fafc; padding: 12px; border-radius: 6px; }
+.cg-local-execution { background: #f8fafc; padding: 12px; border-radius: 8px; }
+@media (max-width: 640px) {
+  .cg-head { flex-wrap: wrap; }.cg-title { flex-basis: 100%; flex-wrap: wrap; }.cg-meta { flex-wrap: wrap; }
+  .cg-proof-grid { grid-template-columns: minmax(0,1fr); }
+  .cg-detail-head, .cg-detail-body { padding-left: 12px; padding-right: 12px; }
+  .cg-call-list button { grid-template-columns: minmax(70px,1fr) minmax(90px,1fr) 70px 12px; font-size: 11px; gap: 4px; }
+  .cg-bus-counts { flex-basis: 100%; }
+  .cg-detail-actions .cg-proof-note { margin-left: 0; }
+}
 
 @keyframes cg-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes cg-out { to { opacity: 0; transform: scale(.94); } }

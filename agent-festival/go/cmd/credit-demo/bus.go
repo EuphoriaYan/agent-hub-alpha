@@ -32,50 +32,53 @@ type BusBinding struct {
 }
 
 type RemoteCall struct {
-	NodeExecutionID string            `json:"node_execution_id"`
-	GraphRevision   string            `json:"graph_revision"`
-	NodePath        string            `json:"node_path"`
-	LoopIteration   int               `json:"loop_iteration"`
-	Attempt         int               `json:"attempt"`
-	Binding         BusBinding        `json:"binding"`
-	InputDigest     string            `json:"input_digest"`
-	Input           string            `json:"input"`
-	Goal            string            `json:"goal"`
-	RequestID       string            `json:"request_id"`
-	MessageID       string            `json:"message_id"`
-	ContextID       string            `json:"context_id"`
-	RemoteTaskID    string            `json:"remote_task_id,omitempty"`
-	Status          string            `json:"status"`
-	Reason          string            `json:"reason,omitempty"`
-	Sequence        int64             `json:"sequence"`
-	CreatedAt       string            `json:"created_at"`
-	UpdatedAt       string            `json:"updated_at"`
-	AgentStartedAt  string            `json:"agent_started_at,omitempty"`
-	ArtifactID      string            `json:"artifact_id,omitempty"`
-	ArtifactDigest  string            `json:"artifact_digest,omitempty"`
-	ModelEvents     map[string]string `json:"model_events"`
+	NodeExecutionID  string                     `json:"node_execution_id"`
+	GraphRevision    string                     `json:"graph_revision"`
+	NodePath         string                     `json:"node_path"`
+	LoopIteration    int                        `json:"loop_iteration"`
+	Attempt          int                        `json:"attempt"`
+	Binding          BusBinding                 `json:"binding"`
+	InputDigest      string                     `json:"input_digest"`
+	Input            string                     `json:"input"`
+	Goal             string                     `json:"goal"`
+	RequestID        string                     `json:"request_id"`
+	MessageID        string                     `json:"message_id"`
+	ContextID        string                     `json:"context_id"`
+	RemoteTaskID     string                     `json:"remote_task_id,omitempty"`
+	Status           string                     `json:"status"`
+	Reason           string                     `json:"reason,omitempty"`
+	Sequence         int64                      `json:"sequence"`
+	CreatedAt        string                     `json:"created_at"`
+	UpdatedAt        string                     `json:"updated_at"`
+	AgentStartedAt   string                     `json:"agent_started_at,omitempty"`
+	ArtifactID       string                     `json:"artifact_id,omitempty"`
+	ArtifactDigest   string                     `json:"artifact_digest,omitempty"`
+	ModelEvents      map[string]string          `json:"model_events"`
+	Discovery        *DiscoverySnapshot         `json:"discovery,omitempty"`
+	GatewayExchanges map[string]GatewayExchange `json:"gateway_exchanges,omitempty"`
 	// This scoped credential is persisted privately and never projected to UI.
 	CapabilityToken string `json:"capability_token"`
 }
 
 type CallCommand struct {
-	RunID           string `json:"run_id"`
-	Token           string `json:"token"`
-	Step            string `json:"step"`
-	Input           string `json:"input,omitempty"`
-	Goal            string `json:"goal,omitempty"`
-	NodeExecutionID string `json:"node_execution_id,omitempty"`
-	InputDigest     string `json:"input_digest,omitempty"`
-	Attempt         int    `json:"attempt,omitempty"`
-	RemoteTaskID    string `json:"remote_task_id,omitempty"`
-	ContextID       string `json:"context_id,omitempty"`
-	Status          string `json:"status,omitempty"`
-	Reason          string `json:"reason,omitempty"`
-	Sequence        int64  `json:"sequence,omitempty"`
-	Output          string `json:"output,omitempty"`
-	ServiceID       string `json:"service_id,omitempty"`
-	ServiceVersion  string `json:"service_version,omitempty"`
-	EventID         string `json:"event_id,omitempty"`
+	RunID           string           `json:"run_id"`
+	Token           string           `json:"token"`
+	Step            string           `json:"step"`
+	Input           string           `json:"input,omitempty"`
+	Goal            string           `json:"goal,omitempty"`
+	NodeExecutionID string           `json:"node_execution_id,omitempty"`
+	InputDigest     string           `json:"input_digest,omitempty"`
+	Attempt         int              `json:"attempt,omitempty"`
+	RemoteTaskID    string           `json:"remote_task_id,omitempty"`
+	ContextID       string           `json:"context_id,omitempty"`
+	Status          string           `json:"status,omitempty"`
+	Reason          string           `json:"reason,omitempty"`
+	Sequence        int64            `json:"sequence,omitempty"`
+	Output          string           `json:"output,omitempty"`
+	ServiceID       string           `json:"service_id,omitempty"`
+	ServiceVersion  string           `json:"service_version,omitempty"`
+	EventID         string           `json:"event_id,omitempty"`
+	Gateway         *GatewayExchange `json:"gateway,omitempty"`
 }
 
 var errCallConflict = errors.New("node input, contract or result conflict")
@@ -89,32 +92,37 @@ func canonicalHash(value any) (string, error) {
 }
 
 func (s *Service) readBinding(expert string) (BusBinding, error) {
+	binding, _, err := s.observeBinding(expert)
+	return binding, err
+}
+
+func (s *Service) observeBinding(expert string) (BusBinding, *DiscoverySnapshot, error) {
 	id := busAgents[expert]
 	if id == "" || s.cfg.BusRegistryURL == "" || s.cfg.BusRegistryToken == "" {
-		return BusBinding{}, fmt.Errorf("real capability discovery is not configured for %s", expert)
+		return BusBinding{}, nil, fmt.Errorf("real capability discovery is not configured for %s", expert)
 	}
 	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(s.cfg.BusRegistryURL, "/")+"/v2/agents/"+url.PathEscape(id)+"/card", nil)
 	if err != nil {
-		return BusBinding{}, err
+		return BusBinding{}, nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+s.cfg.BusRegistryToken)
 	req.Header.Set("X-Tenant-ID", s.cfg.BusTenant)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
-		return BusBinding{}, fmt.Errorf("RDC discovery unavailable: %w", err)
+		return BusBinding{}, nil, fmt.Errorf("RDC discovery unavailable: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return BusBinding{}, fmt.Errorf("RDC card %s unavailable: HTTP %d", id, resp.StatusCode)
+		return BusBinding{}, nil, fmt.Errorf("RDC card %s unavailable: HTTP %d", id, resp.StatusCode)
 	}
 	var card map[string]any
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&card); err != nil {
-		return BusBinding{}, err
+		return BusBinding{}, nil, err
 	}
 	for _, key := range []string{"rawJson", "agentCardJson", "agentCard", "card"} {
 		if raw, ok := card[key].(string); ok {
 			if err := json.Unmarshal([]byte(raw), &card); err != nil {
-				return BusBinding{}, err
+				return BusBinding{}, nil, err
 			}
 			break
 		}
@@ -126,33 +134,37 @@ func (s *Service) readBinding(expert string) (BusBinding, error) {
 	name, _ := card["name"].(string)
 	version, _ := card["version"].(string)
 	if name != id || version == "" {
-		return BusBinding{}, fmt.Errorf("RDC card identity/version invalid for %s", id)
+		return BusBinding{}, nil, fmt.Errorf("RDC card identity/version invalid for %s", id)
 	}
 	instancesRequest, _ := http.NewRequest(http.MethodGet, strings.TrimRight(s.cfg.BusRegistryURL, "/")+"/v2/agents/"+url.PathEscape(id)+"/instances", nil)
 	instancesRequest.Header = req.Header.Clone()
 	instancesResponse, err := (&http.Client{Timeout: 5 * time.Second}).Do(instancesRequest)
 	if err != nil {
-		return BusBinding{}, fmt.Errorf("RDC instances unavailable: %w", err)
+		return BusBinding{}, nil, fmt.Errorf("RDC instances unavailable: %w", err)
 	}
 	defer instancesResponse.Body.Close()
 	var discovery struct {
 		Instances []struct {
+			InstanceID        string `json:"instanceId"`
 			Health            string `json:"health"`
 			ContractVersion   string `json:"contractVersion"`
 			CapabilityVersion string `json:"capabilityVersion"`
 		} `json:"instances"`
 	}
 	if instancesResponse.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(instancesResponse.Body, 1<<20)).Decode(&discovery) != nil {
-		return BusBinding{}, fmt.Errorf("RDC instance discovery failed for %s", id)
+		return BusBinding{}, nil, fmt.Errorf("RDC instance discovery failed for %s", id)
 	}
+	snapshot := &DiscoverySnapshot{CheckedAt: now(), Candidates: []DiscoveredInstance{}}
 	available := false
 	for _, instance := range discovery.Instances {
+		eligible := instance.Health == "ONLINE" && instance.ContractVersion == "1.0" && instance.CapabilityVersion == version
+		snapshot.Candidates = append(snapshot.Candidates, DiscoveredInstance{InstanceID: instance.InstanceID, Health: instance.Health, ContractVersion: instance.ContractVersion, CapabilityVersion: instance.CapabilityVersion, Eligible: eligible})
 		if instance.Health == "ONLINE" && instance.ContractVersion == "1.0" && instance.CapabilityVersion == version {
 			available = true
 		}
 	}
 	if !available {
-		return BusBinding{}, fmt.Errorf("no healthy A2A 1.0 instance matching capability %s version %s", id, version)
+		return BusBinding{}, nil, fmt.Errorf("no healthy A2A 1.0 instance matching capability %s version %s", id, version)
 	}
 	// Routing addresses may change; capability semantics may not silently change.
 	semantic := map[string]any{}
@@ -161,9 +173,9 @@ func (s *Service) readBinding(expert string) (BusBinding, error) {
 	}
 	digest, err := canonicalHash(semantic)
 	if err != nil {
-		return BusBinding{}, err
+		return BusBinding{}, nil, err
 	}
-	return BusBinding{AgentID: id, Version: version, CardDigest: digest, ContractDigest: s.cat.Hashes[expert]}, nil
+	return BusBinding{AgentID: id, Version: version, CardDigest: digest, ContractDigest: s.cat.Hashes[expert]}, snapshot, nil
 }
 
 func (s *Service) bindPlan(p *Plan) error {
@@ -276,7 +288,7 @@ func (s *Service) BeginCall(in CallCommand) (map[string]any, error) {
 		}
 		return map[string]any{"action": action, "call": copyCall(c), "output": st.Output}, nil
 	}
-	actual, err := s.readBinding(st.Expert)
+	actual, discovery, err := s.observeBinding(st.Expert)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +298,7 @@ func (s *Service) BeginCall(in CallCommand) (map[string]any, error) {
 	node := sha(r.ID, p.Key(), in.Step, "iteration:0")
 	c := &RemoteCall{NodeExecutionID: node, GraphRevision: p.Key(), NodePath: in.Step, LoopIteration: 0, Attempt: 1, Binding: binding,
 		InputDigest: digest, Input: in.Input, Goal: in.Goal, RequestID: newToken(), MessageID: newToken(), ContextID: "ctx-" + newToken(),
-		Status: "dispatching", CreatedAt: now(), UpdatedAt: now(), CapabilityToken: newToken() + newToken(), ModelEvents: map[string]string{}}
+		Status: "dispatching", CreatedAt: now(), UpdatedAt: now(), CapabilityToken: newToken() + newToken(), ModelEvents: map[string]string{}, Discovery: discovery}
 	st.Call, st.Status, st.StartedAt, st.Epoch = c, "running", now(), r.Epoch
 	st.Activity = "经 Agent Bus 调用专业 Agent"
 	if err := s.save(); err != nil {
@@ -330,6 +342,9 @@ func (s *Service) UpdateCall(in CallCommand) error {
 	}
 	if !contains([]string{"waiting", "unknown", "failed"}, in.Status) {
 		return fmt.Errorf("invalid remote status")
+	}
+	if err := recordGateway(c, in); err != nil {
+		return err
 	}
 	if in.RemoteTaskID != "" {
 		c.RemoteTaskID = in.RemoteTaskID
