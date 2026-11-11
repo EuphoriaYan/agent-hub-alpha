@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,29 +22,33 @@ import (
 )
 
 type Config struct {
-	Addr            string
-	DataDir         string
-	OrchestratorURL string
-	PublicURL       string   // where browsers reach this service: a path behind the front proxy, e.g. /credit
-	Origins         []string // browser origins of the WorkSwarm UI; the MCP App may fetch /api/graph from them
-	MemberMCPURL    string
-	Model           string
-	SpecPath        string
-	LeaseSeconds    int
+	Addr             string
+	DataDir          string
+	OrchestratorURL  string
+	PublicURL        string   // where browsers reach this service: a path behind the front proxy, e.g. /credit
+	Origins          []string // browser origins of the WorkSwarm UI; the MCP App may fetch /api/graph from them
+	MemberMCPURL     string
+	Model            string
+	SpecPath         string
+	LeaseSeconds     int
+	BusRegistryURL   string
+	BusRegistryToken string
+	BusTenant        string
 }
 
 // StepRec is the authoritative record of one blueprint step in a run.
 type StepRec struct {
-	ID         string   `json:"id"`
-	Expert     string   `json:"expert"`
-	Status     string   `json:"status"` // pending running done skipped failed
-	Output     string   `json:"output,omitempty"`
-	Reused     int      `json:"reused,omitempty"`
-	StartedAt  string   `json:"started_at,omitempty"`
-	FinishedAt string   `json:"finished_at,omitempty"`
-	Epoch      int      `json:"epoch,omitempty"`
-	Branches   []Branch `json:"branches,omitempty"`
-	Activity   string   `json:"activity,omitempty"` // what the step is doing right now, for the live graph
+	ID         string      `json:"id"`
+	Expert     string      `json:"expert"`
+	Status     string      `json:"status"` // pending running done skipped failed
+	Output     string      `json:"output,omitempty"`
+	Reused     int         `json:"reused,omitempty"`
+	StartedAt  string      `json:"started_at,omitempty"`
+	FinishedAt string      `json:"finished_at,omitempty"`
+	Epoch      int         `json:"epoch,omitempty"`
+	Branches   []Branch    `json:"branches,omitempty"`
+	Activity   string      `json:"activity,omitempty"` // what the step is doing right now, for the live graph
+	Call       *RemoteCall `json:"remote_call,omitempty"`
 }
 
 // Branch is one sub-goal a black-box (Loop Forest) step forked at run time.
@@ -92,15 +97,18 @@ type State struct {
 }
 
 type Service struct {
-	cfg      Config
-	mu       sync.Mutex
-	st       *State
-	cat      *Catalog
-	bank     *Provider
-	spec     map[string]any
-	levels   []string
-	machines map[string]*adopt.Machine
-	logs     map[string]*evidlog.Log
+	cfg        Config
+	mu         sync.Mutex
+	st         *State
+	cat        *Catalog
+	bank       *Provider
+	spec       map[string]any
+	levels     []string
+	machines   map[string]*adopt.Machine
+	logs       map[string]*evidlog.Log
+	lastSaved  []byte
+	storageErr error
+	writeState func(string, any) error
 }
 
 func OpenService(cfg Config) (*Service, error) {
@@ -145,20 +153,40 @@ func OpenService(cfg Config) (*Service, error) {
 		for _, r := range s.st.Runs {
 			r.Token = r.TokenSaved
 		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read state: %w", err)
 	}
+	s.lastSaved, _ = json.Marshal(s.st)
+	s.writeState = writeJSON
 	s.bank = NewProvider(func(string, string, string) {})
 	s.bank.TerminalDelay = 4 * time.Second
 	return s, nil
 }
 
 // save must be called with s.mu held.
-func (s *Service) save() {
+var errStorage = errors.New("persistent record unavailable; restart after repairing storage")
+
+func (s *Service) save() error {
+	if s.storageErr != nil {
+		return s.storageErr
+	}
 	for _, r := range s.st.Runs {
 		r.TokenSaved = r.Token
 	}
-	if err := writeJSON(filepath.Join(s.cfg.DataDir, "state.json"), s.st); err != nil {
-		fmt.Fprintln(os.Stderr, "save state:", err)
+	if err := s.writeState(filepath.Join(s.cfg.DataDir, "state.json"), s.st); err != nil {
+		// A failure after rename can have an uncertain on-disk outcome. Freeze
+		// mutations until restart reconciles disk; never publish dirty memory.
+		var restored State
+		_ = json.Unmarshal(s.lastSaved, &restored)
+		for _, r := range restored.Runs {
+			r.Token = r.TokenSaved
+		}
+		s.st = &restored
+		s.storageErr = fmt.Errorf("%w: %v", errStorage, err)
+		return s.storageErr
 	}
+	s.lastSaved, _ = json.Marshal(s.st)
+	return nil
 }
 
 func (s *Service) machine(runID string) (*adopt.Machine, error) {
@@ -221,9 +249,15 @@ func (s *Service) Propose(in ProposeInput) (*Plan, error) {
 		return nil, err
 	}
 	p.Precheck = precheck(p)
+	if err := s.bindPlan(p); err != nil {
+		return nil, err
+	}
 	p.Hash = planHash(p, s.cat.Hashes)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.storageErr != nil {
+		return nil, s.storageErr
+	}
 	if in.PlanID != "" {
 		if _, ok := s.st.Plans[in.PlanID]; !ok {
 			return nil, fmt.Errorf("unknown plan %q", in.PlanID)
@@ -235,7 +269,9 @@ func (s *Service) Propose(in ProposeInput) (*Plan, error) {
 	}
 	p.Version = len(s.st.Plans[p.ID]) + 1
 	s.st.Plans[p.ID] = append(s.st.Plans[p.ID], p)
-	s.save()
+	if err := s.save(); err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 
@@ -265,8 +301,14 @@ func (s *Service) Approve(planID string, version int, hash, user string) (*Run, 
 	if pc := precheck(p); !pc.OK {
 		return nil, fmt.Errorf("precheck rejects this plan")
 	}
+	if err := s.checkBindings(p); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.storageErr != nil {
+		return nil, s.storageErr
+	}
 	if p.RunID != "" {
 		return s.st.Runs[p.RunID], nil
 	}
@@ -282,7 +324,9 @@ func (s *Service) Approve(planID string, version int, hash, user string) (*Run, 
 	}
 	p.ApprovedBy, p.RunID = user, r.ID
 	s.st.Runs[r.ID] = r
-	s.save()
+	if err := s.save(); err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
@@ -312,16 +356,17 @@ func (s *Service) RunForPlan(planID string) (*Run, bool) {
 // ---------- executor protocol (lease, steps, judgment, effect) ----------
 
 type Job struct {
-	RunID        string                    `json:"run_id"`
-	Token        string                    `json:"token"`
-	Epoch        int                       `json:"epoch"`
-	Mode         string                    `json:"mode"`
-	Team         []map[string]any          `json:"team"`
-	SpecDigest   string                    `json:"spec_digest"`
-	UserInput    string                    `json:"user_input"`
-	Members      map[string]map[string]any `json:"members"`
-	MemberMCPURL string                    `json:"member_mcp_url"`
-	LeaseSeconds int                       `json:"lease_seconds"`
+	RunID         string                    `json:"run_id"`
+	Token         string                    `json:"token"`
+	Epoch         int                       `json:"epoch"`
+	Mode          string                    `json:"mode"`
+	Team          []map[string]any          `json:"team"`
+	SpecDigest    string                    `json:"spec_digest"`
+	UserInput     string                    `json:"user_input"`
+	Members       map[string]map[string]any `json:"members"`
+	MemberMCPURL  string                    `json:"member_mcp_url"`
+	LeaseSeconds  int                       `json:"lease_seconds"`
+	GraphRevision string                    `json:"graph_revision"`
 }
 
 func newToken() string {
@@ -332,9 +377,12 @@ func newToken() string {
 
 // Lease hands one runnable run to an executor. A run whose lease expired is
 // taken over with a new token; the old executor's writes are then fenced.
-func (s *Service) Lease(worker string) (*Job, bool) {
+func (s *Service) Lease(worker string) (*Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.storageErr != nil {
+		return nil, s.storageErr
+	}
 	ids := make([]string, 0, len(s.st.Runs))
 	for id := range s.st.Runs {
 		ids = append(ids, id)
@@ -364,11 +412,16 @@ func (s *Service) Lease(worker string) (*Job, bool) {
 				}
 			}
 		}
-		s.save()
+		if err := s.save(); err != nil {
+			return nil, err
+		}
 		members := map[string]map[string]any{}
 		for _, a := range p.Agents {
 			e := expertByID(a.Expert)
 			m := map[string]any{"kind": e.Kind, "expert": e.ID, "name": e.Name, "tools": e.Tools}
+			if binding, ok := p.BusBindings[a.ID]; ok {
+				m["bus_binding"] = binding
+			}
 			if e.Kind == "judge" {
 				var deps []string
 				for _, st := range p.Steps {
@@ -382,20 +435,23 @@ func (s *Service) Lease(worker string) (*Job, bool) {
 		}
 		return &Job{RunID: r.ID, Token: r.Token, Epoch: r.Epoch, Mode: "graph", Team: p.Team, SpecDigest: p.SpecDigest,
 			UserInput: fmt.Sprintf("案件号：%s。任务：%s", r.CaseID, p.Goal),
-			Members:   members, MemberMCPURL: s.cfg.MemberMCPURL, LeaseSeconds: s.cfg.LeaseSeconds}, true
+			Members:   members, MemberMCPURL: s.cfg.MemberMCPURL, LeaseSeconds: s.cfg.LeaseSeconds, GraphRevision: p.Key()}, nil
 	}
-	return nil, false
+	return nil, nil
 }
 
 var errFenced = fmt.Errorf("fenced: this executor's lease was taken over")
 
 // fence checks the caller's token; must be called with s.mu held.
 func (s *Service) fence(runID, token string) (*Run, error) {
+	if s.storageErr != nil {
+		return nil, s.storageErr
+	}
 	r, ok := s.st.Runs[runID]
 	if !ok {
 		return nil, fmt.Errorf("unknown run")
 	}
-	if r.Token != token {
+	if token == "" || r.Token != token {
 		return nil, errFenced
 	}
 	return r, nil
@@ -425,14 +481,21 @@ func (s *Service) StepGet(runID, token, step string) (bool, string, error) {
 	if !ok {
 		return false, "", fmt.Errorf("step %q is not in the approved plan", step)
 	}
+	if _, remote := s.st.Plans[r.PlanID][r.PlanVersion-1].BusBindings[step]; remote {
+		return false, "", fmt.Errorf("remote node requires input-bound call endpoint")
+	}
 	if st.Status == "done" {
 		st.Reused++
-		s.save()
+		if err := s.save(); err != nil {
+			return false, "", err
+		}
 		return true, st.Output, nil
 	}
 	st.Status, st.StartedAt, st.Epoch = "running", now(), r.Epoch
 	st.Activity = startActivity[expertByID(st.Expert).Kind]
-	s.save()
+	if err := s.save(); err != nil {
+		return false, "", err
+	}
 	return false, "", nil
 }
 
@@ -467,11 +530,19 @@ func (s *Service) StepPut(runID, token, step, output string) error {
 		return fmt.Errorf("step %q is not in the approved plan", step)
 	}
 	if st.Status == "done" {
-		return nil // first committed result wins
+		if st.Output != output {
+			return errCallConflict
+		}
+		return nil
+	}
+	if st.Call != nil {
+		return fmt.Errorf("remote result requires the call commit endpoint")
+	}
+	if _, remote := s.st.Plans[r.PlanID][r.PlanVersion-1].BusBindings[step]; remote {
+		return fmt.Errorf("remote result requires the call commit endpoint")
 	}
 	st.Status, st.Output, st.FinishedAt = "done", output, now()
-	s.save()
-	return nil
+	return s.save()
 }
 
 // BranchEvent records a fork of a black-box step: the inside of the box is
@@ -492,15 +563,13 @@ func (s *Service) BranchEvent(runID, token, step, goal, status string, chars int
 		for i := len(st.Branches) - 1; i >= 0; i-- {
 			if st.Branches[i].Goal == goal && st.Branches[i].Status == "started" {
 				st.Branches[i].Status, st.Branches[i].Chars = "finished", chars
-				s.save()
-				return nil
+				return s.save()
 			}
 		}
 	}
 	st.Activity = "分叉：" + goal
 	st.Branches = append(st.Branches, Branch{Goal: goal, Status: status, Chars: chars, At: now()})
-	s.save()
-	return nil
+	return s.save()
 }
 
 func (s *Service) Done(runID, token string, skipped []string, final string, failed string) error {
@@ -509,6 +578,17 @@ func (s *Service) Done(runID, token string, skipped []string, final string, fail
 	r, err := s.fence(runID, token)
 	if err != nil {
 		return err
+	}
+	for _, st := range r.Steps {
+		if st.Call != nil && st.Status != "done" && st.Status != "failed" {
+			if st.Call.Status == "dispatching" {
+				st.Call.Status = "unknown"
+				st.Status = "unknown"
+			}
+			r.Status, r.Final = "waiting", "等待远端结果；未确认的调用不会自动重发"
+			r.Token = ""
+			return s.save()
+		}
 	}
 	for _, id := range skipped {
 		if st, ok := r.Steps[id]; ok && st.Status != "done" {
@@ -522,8 +602,7 @@ func (s *Service) Done(runID, token string, skipped []string, final string, fail
 		r.Final = failed
 	}
 	r.Token = ""
-	s.save()
-	return nil
+	return s.save()
 }
 
 func (s *Service) judgePrompt() string {
@@ -638,7 +717,9 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	reqDoc := jsonDoc(req)
 	r.ReplaySteps = append(r.ReplaySteps, map[string]any{"op": "adopt", "request": reqDoc})
 	if out.Status != "adopted" && out.Status != "reused" {
-		s.save()
+		if err := s.save(); err != nil {
+			return "", err
+		}
 		return "", fmt.Errorf("adoption %s: %s", out.Status, out.Detail)
 	}
 	r.Decision, r.DecisionOp = decision, op
@@ -646,7 +727,9 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	if st := r.Steps[step]; st != nil {
 		st.Activity = "判断已采纳：" + level
 	}
-	s.save()
+	if err := s.save(); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("DECISION=%s\n依据：%v\n证据步骤：%v", strings.ToUpper(level), j["rationale"], j["evidence_steps"]), nil
 }
 
@@ -692,20 +775,29 @@ func (s *Service) Effect(runID, token, step string) (string, error) {
 			st.Activity = "已派发，等银行回执"
 		}
 		if out.Status != "dispatched" {
-			s.save()
+			saveErr := s.save()
 			s.mu.Unlock()
+			if saveErr != nil {
+				return "", saveErr
+			}
 			return "", fmt.Errorf("dispatch %s: %s", out.Status, out.Detail)
 		}
-		s.save()
+		saveErr := s.save()
 		s.mu.Unlock()
+		if saveErr != nil {
+			return "", saveErr
+		}
 		if _, err := s.bank.Submit(br, r.Scenario); err != nil {
 			s.mu.Lock()
 			m.MarkUnresolved(op)
 			s.record(r, "mark_unresolved", nil)
 			r.Receipt = "结果未知：" + err.Error() + "（不重发，改为查询）"
 			r.ReceiptOf = "unknown"
-			s.save()
+			saveErr := s.save()
 			s.mu.Unlock()
+			if saveErr != nil {
+				return "", saveErr
+			}
 		}
 	} else {
 		s.mu.Unlock()
@@ -736,7 +828,9 @@ func (s *Service) Effect(runID, token, step string) (string, error) {
 	line := strings.TrimPrefix(level, "grant-")
 	r.Receipt = fmt.Sprintf("银行回执：%s（业务请求 %s，额度 %s USD）", status, br, line)
 	r.ReceiptOf = status
-	s.save()
+	if err := s.save(); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("RECEIPT=%s\n业务请求：%s\n额度：%s USD", strings.ToUpper(status), br, line), nil
 }
 
@@ -747,6 +841,9 @@ func (s *Service) ToolCall(runID, token, step, tool, arg string) (map[string]any
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, err := s.fence(runID, token)
+	if err != nil {
+		r, _, err = s.agentCall(CallCommand{RunID: runID, Token: token, Step: step})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -763,7 +860,9 @@ func (s *Service) ToolCall(runID, token, step, tool, arg string) (map[string]any
 	refuse := func(why string) (map[string]any, error) {
 		st.Activity = "调用被拒：" + why
 		r.Violations = append(r.Violations, fmt.Sprintf("%s %s（%s）调用 %s(%s) 被拒绝：%s", now(), step, e.Name, tool, arg, why))
-		s.save()
+		if err := s.save(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("refused by contract: %s", why)
 	}
 	if !contains(e.Tools, tool) {

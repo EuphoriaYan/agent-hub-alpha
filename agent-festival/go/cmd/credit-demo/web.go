@@ -92,6 +92,7 @@ const planBody = `{{with .Plan}}<h1>编排单 {{.ID}} · 第 {{.Version}} 版 <s
 
 const runBody = `{{with .Run}}<h1>执行 {{.ID}} <small>编排单 <a href="{{$.Base}}/ui/plan/{{.PlanID}}/v{{.PlanVersion}}">{{.PlanID}} v{{.PlanVersion}}</a> · {{.Status}}</small></h1>
 <div class="graph" data-graph="{{$.Base}}/api/graph?run={{.ID}}"></div>
+{{if eq .Status "waiting"}}<p>{{.Final}}</p>{{if $.User}}<form method="post" action="{{$.Base}}/ui/run/{{.ID}}/resume"><button class="btn">核对原任务并继续</button></form>{{else}}<p><a href="{{$.Base}}/ui/login?next=/ui/run/{{.ID}}">登录后核对原任务</a></p>{{end}}{{end}}
 {{with .Decision}}<div class="ok">已采纳判断：<b>{{.level}}</b> · {{.rationale}}</div>{{end}}
 {{if .Receipt}}<div class="ok">{{.Receipt}}</div>{{end}}
 {{range .Violations}}<div class="bad">{{.}}</div>{{end}}
@@ -115,6 +116,7 @@ func (s *Service) base() string {
 }
 
 func (s *Service) routes(mux *http.ServeMux) {
+	s.busRoutes(mux)
 	mux.HandleFunc("/api/graph", s.serveGraph)
 	mux.HandleFunc("/api/approve", s.serveApprove)
 	static := http.FileServerFS(webFS)
@@ -179,6 +181,18 @@ func (s *Service) routes(mux *http.ServeMux) {
 			return
 		}
 		user := users[currentUser(r)]
+		if len(parts) == 2 && parts[1] == "resume" && r.Method == http.MethodPost {
+			if currentUser(r) == "" {
+				http.Error(w, "login required", http.StatusUnauthorized)
+				return
+			}
+			if err := s.ResumeRun(run.ID); err != nil {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Redirect(w, r, s.base()+"/ui/run/"+run.ID, http.StatusSeeOther)
+			return
+		}
 		if len(parts) == 2 && parts[1] == "verify" {
 			tamper := r.URL.Query().Get("tamper") == "1"
 			rep, err := s.Verify(run.ID, tamper)
@@ -217,6 +231,9 @@ func (s *Service) routes(mux *http.ServeMux) {
 		if errors.Is(err, errFenced) {
 			code = http.StatusConflict
 		}
+		if errors.Is(err, errStorage) {
+			code = http.StatusServiceUnavailable
+		}
 		jsonOut(w, code, map[string]string{"error": err.Error()})
 	}
 	type call struct {
@@ -235,7 +252,12 @@ func (s *Service) routes(mux *http.ServeMux) {
 		_ = jsonIn(r, &c)
 		deadline := time.Now().Add(20 * time.Second)
 		for {
-			if job, ok := s.Lease(c.Worker); ok {
+			job, err := s.Lease(c.Worker)
+			if err != nil {
+				errOut(w, err)
+				return
+			}
+			if job != nil {
 				jsonOut(w, 200, job)
 				return
 			}
@@ -328,7 +350,15 @@ func (s *Service) routes(mux *http.ServeMux) {
 		defer s.mu.Unlock()
 		jsonOut(w, 200, s.st)
 	})
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.storageErr != nil {
+			http.Error(w, "durable state unavailable; restore storage and restart", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	})
 }
 
 func envOr(k, def string) string {

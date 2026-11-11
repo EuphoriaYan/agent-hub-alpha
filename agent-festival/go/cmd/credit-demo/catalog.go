@@ -92,7 +92,7 @@ var experts = []*Expert{
 		Summary:     "黑盒节点（Loop Forest）：自主拆分，先查关联方名单，再逐个分叉排查征信，运行时才展开",
 		requires:    []grant{read("data:credit/related/*", "related-party list"), read("data:credit/related-bureau/*", "credit summary of related companies")},
 		effectLevel: "none", costCents: 80, calls: 5, seconds: 300},
-	{ID: "risk-judge", Name: "风险判断（S1）", Kind: "judge",
+	{ID: "risk-judge", Name: "风险判断（规约）", Kind: "judge",
 		Summary:     "按已发布的授信判断规约，对上游证据给出结构化判断",
 		requires:    []grant{read("data:credit/evidence/*", "upstream evidence of this case")},
 		effectLevel: "none", costCents: 30, calls: 0, seconds: 120},
@@ -301,11 +301,30 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), ".state-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(f.Name())
+	if _, err = f.Write(raw); err == nil {
+		err = f.Sync()
+	}
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err = os.Rename(f.Name(), path); err != nil {
+		return err
+	}
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 // jsonDoc round-trips v through JSON so numbers are float64, the shape the

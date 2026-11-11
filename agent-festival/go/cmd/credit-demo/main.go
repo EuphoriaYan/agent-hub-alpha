@@ -16,15 +16,18 @@ import (
 func main() {
 	lease, _ := strconv.Atoi(envOr("CREDIT_LEASE_SECONDS", "30"))
 	cfg := Config{
-		Addr:            envOr("CREDIT_ADDR", ":8091"),
-		DataDir:         envOr("CREDIT_DATA", "/data"),
-		OrchestratorURL: envOr("CREDIT_ORCHESTRATOR_URL", "http://orchestrator:8195"),
-		PublicURL:       strings.TrimRight(envOr("CREDIT_PUBLIC_URL", "/credit"), "/"),
-		Origins:         strings.Split(envOr("CREDIT_ORIGINS", "http://localhost:15192"), ","),
-		MemberMCPURL:    envOr("CREDIT_MEMBER_MCP_URL", "http://credit:8091/member-mcp"),
-		Model:           envOr("CREDIT_MODEL", "qwen-plus"),
-		SpecPath:        envOr("CREDIT_SPEC", "judgment-spec-credit.json"),
-		LeaseSeconds:    lease,
+		Addr:             envOr("CREDIT_ADDR", ":8091"),
+		DataDir:          envOr("CREDIT_DATA", "/data"),
+		OrchestratorURL:  envOr("CREDIT_ORCHESTRATOR_URL", "http://orchestrator:8195"),
+		PublicURL:        strings.TrimRight(envOr("CREDIT_PUBLIC_URL", "/credit"), "/"),
+		Origins:          strings.Split(envOr("CREDIT_ORIGINS", "http://localhost:15192"), ","),
+		MemberMCPURL:     envOr("CREDIT_MEMBER_MCP_URL", "http://credit:8091/member-mcp"),
+		Model:            envOr("CREDIT_MODEL", "qwen-plus"),
+		SpecPath:         envOr("CREDIT_SPEC", "judgment-spec-credit.json"),
+		LeaseSeconds:     lease,
+		BusRegistryURL:   envOr("CREDIT_RDC_URL", ""),
+		BusRegistryToken: envOr("RDC_REGISTRY_API_TOKEN", ""),
+		BusTenant:        envOr("CREDIT_BUS_TENANT", "issue16"),
 	}
 	s, err := OpenService(cfg)
 	if err != nil {

@@ -104,6 +104,10 @@ final class Worker implements Runnable {
             Map<String, SubAgentExecutor> bindings = new LinkedHashMap<>();
             for (MemberSpec m : spec.members()) {
                 JsonNode mj = job.path("members").path(m.id());
+                if (mj.has("bus_binding")) {
+                    bindings.put(m.id(), new RemoteAgentMember(go, run, token, m.id(), env));
+                    continue;
+                }
                 SubAgentExecutor inner = member(job, run, token, m.id(), mj, mounts);
                 bindings.put(m.id(), new Ledgered(run, token, m.id(), inner, fenced));
             }

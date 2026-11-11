@@ -13,6 +13,7 @@ export interface RunIf { step: string; contains: string; negate?: boolean }
 export interface GraphNode {
   id: string; name: string; kind: string; role?: string; task: string; deps?: string[]; when?: RunIf;
   effect?: string; reads?: string[]; contract?: string; denied?: string; status?: string; activity?: string; output?: string; branches?: Branch[];
+  remote?: { agent_id: string; task_id: string; status: string; model_calls: number; artifact_id: string };
 }
 export interface Check { name: string; ok: boolean; detail: string; items?: string[] }
 export interface Graph {
@@ -39,7 +40,7 @@ const EDGE_COLORS: Record<string, string> = { idle: "#cfd4dc", active: "#93b4f5"
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const finished = (s?: string) => s === "done" || s === "reused";
 // Once a run exists, an expert appears when it starts.
-const started = (s?: string) => s === "running" || s === "failed" || finished(s);
+const started = (s?: string) => s === "running" || s === "waiting" || s === "unknown" || s === "failed" || finished(s);
 // Phase for looping animations in elements that are rebuilt on every change,
 // so spinners and flowing dashes carry on instead of jumping back to the start.
 const phase = () => `-${Math.round(performance.now() % 7000)}ms`;
@@ -207,7 +208,7 @@ export class GraphView {
       const pass = g.verify.checks.filter((c) => c.ok).length;
       chip = g.verify.ok ? ["ok", `验证通过 ${pass}/${g.verify.checks.length}`] : ["bad", `验证未通过 ${pass}/${g.verify.checks.length}`];
     } else if (g.run) {
-      chip = ({ queued: ["wait", "排队中"], running: ["run", `执行中 ${settled}/${total}`], done: ["ok", "已完成"], failed: ["bad", "执行失败"] } as Record<string, [string, string]>)[g.run.status] ?? ["mute", g.run.status];
+      chip = ({ queued: ["wait", "排队中"], running: ["run", `执行中 ${settled}/${total}`], waiting: ["wait", "等待核对远端结果"], done: ["ok", "已完成"], failed: ["bad", "执行失败"] } as Record<string, [string, string]>)[g.run.status] ?? ["mute", g.run.status];
       if (g.run.stalled) chip = ["bad", "执行器无响应 · 等待接管"];
     } else if (!g.ok) chip = ["bad", "预检未通过"];
     else if (g.superseded) chip = ["mute", `已更新为 v${g.superseded}`];
@@ -246,7 +247,7 @@ export class GraphView {
     const branches = (n.branches ?? []).slice(0, MAX_BRANCHES);
     const more = (n.branches?.length ?? 0) - branches.length;
     const group = !!g.run && n.kind === "blackbox" && branches.length > 0;
-    const activity = status === "running" ? n.activity ?? "" : "";
+    const activity = ["running", "waiting", "unknown"].includes(status) ? n.activity ?? "" : "";
     const sig = JSON.stringify([n.name, n.task, status, denied, result, activity, more,
       branches.map((b) => [b.status, b.title, b.activity, b.finding, b.retried])]);
     v.wide = group;
@@ -275,6 +276,8 @@ export class GraphView {
     if (denied) tags.push(`<span class="cg-tag deny pop">无权限</span>`);
     if (status === "reused") tags.push(`<span class="cg-tag reuse pop">复用</span>`);
     if (status === "skipped") tags.push(`<span class="cg-tag skip">未执行</span>`);
+    if (status === "waiting") tags.push(`<span class="cg-tag">等待结果</span>`);
+    if (status === "unknown") tags.push(`<span class="cg-tag deny">结果待核对</span>`);
     const badge = status === "done" ? `<span class="cg-ok">${TICK}</span>`
       : status === "reused" ? `<span class="cg-ok reused">${TICK}</span>`
       : status === "failed" ? `<span class="cg-ok fail">${CROSS}</span>` : "";
@@ -606,6 +609,7 @@ export class GraphView {
       n.denied && !this.g!.ok ? `<p style="color:var(--red)">${esc(n.denied)}</p>` : ""}${
       n.reads?.length ? `<div class="k">读取</div>${n.reads.map((r) => `<code>${esc(r)}</code>`).join("")}` : ""}${
       n.contract ? `<div class="k">契约</div><code>${esc(n.contract)}</code>` : ""}${
+      n.remote ? `<div class="k">远端执行</div><code>${esc(n.remote.agent_id)}</code><p>模型调用 ${n.remote.model_calls} 次</p>${n.remote.task_id ? `<code>${esc(n.remote.task_id)}</code>` : ""}` : ""}${
       n.output ? `<div class="k">产物</div><div class="out">${esc(n.output)}</div>` : ""}`;
     if (fresh) { this.el.appendChild(pop); this.pop = pop; }
     else if (!refresh) { pop.style.animation = "none"; void pop.offsetWidth; pop.style.animation = ""; }

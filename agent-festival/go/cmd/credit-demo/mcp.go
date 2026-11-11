@@ -104,7 +104,7 @@ func (s *Service) plannerServer() *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_capabilities", Annotations: ro,
 		Description: "List the registered experts (capabilities) with their signed contracts: what each reads, its effects and bounds. Only these experts can be put on a team. plan_rules is the due-diligence rule every plan must satisfy; precheck enforces it."},
 		func(context.Context, *mcp.CallToolRequest, Empty) (*mcp.CallToolResult, any, error) {
-			return result(map[string]any{"experts": s.cat.Cards(), "cases": []string{"C006", "C007"}, "plan_rules": ddRules()}), nil, nil
+			return result(map[string]any{"experts": s.capabilityCards(), "cases": []string{"C006", "C007"}, "plan_rules": ddRules()}), nil, nil
 		})
 	mcp.AddTool(srv, &mcp.Tool{Name: "propose_plan", Meta: graphMeta,
 		Description: "Propose (or revise, with plan_id) a team plan for a case: each agent binds a registered expert to a role, a sub-task and its dependencies. The service compiles it into a blueprint and runs the contract precheck. Nothing executes: execution needs the user's approval on the confirm page."},
@@ -143,7 +143,7 @@ func (s *Service) plannerServer() *mcp.Server {
 			return res, nil, nil
 		})
 	mcp.AddTool(srv, &mcp.Tool{Name: "verify_run", Annotations: ro, Meta: graphMeta,
-		Description: "Verify a finished run with the festival checkers (signatures, approved plan, compose admission, evidence coverage, violations, S1 judgment, replay, ledger rules)."},
+		Description: "Verify a finished run with the festival checkers (signatures, approved plan, compose admission, evidence coverage, violations, judgment-spec compliance, replay, ledger rules)."},
 		func(_ context.Context, _ *mcp.CallToolRequest, in RunRef) (*mcp.CallToolResult, any, error) {
 			id := in.RunID
 			if id == "" {

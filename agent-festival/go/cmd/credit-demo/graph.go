@@ -33,21 +33,22 @@ type Graph struct {
 }
 
 type GraphNode struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name"`
-	Kind     string        `json:"kind"` // investigate blackbox judge write effect
-	Role     string        `json:"role,omitempty"`
-	Task     string        `json:"task"`
-	Deps     []string      `json:"deps,omitempty"`
-	When     *RunIf        `json:"when,omitempty"`
-	Effect   string        `json:"effect,omitempty"`
-	Reads    []string      `json:"reads,omitempty"`
-	Contract string        `json:"contract,omitempty"`
-	Denied   string        `json:"denied,omitempty"`
-	Status   string        `json:"status,omitempty"` // pending running done reused skipped failed
-	Activity string        `json:"activity,omitempty"`
-	Output   string        `json:"output,omitempty"`
-	Branches []GraphBranch `json:"branches,omitempty"`
+	ID       string         `json:"id"`
+	Name     string         `json:"name"`
+	Kind     string         `json:"kind"` // investigate blackbox judge write effect
+	Role     string         `json:"role,omitempty"`
+	Task     string         `json:"task"`
+	Deps     []string       `json:"deps,omitempty"`
+	When     *RunIf         `json:"when,omitempty"`
+	Effect   string         `json:"effect,omitempty"`
+	Reads    []string       `json:"reads,omitempty"`
+	Contract string         `json:"contract,omitempty"`
+	Denied   string         `json:"denied,omitempty"`
+	Status   string         `json:"status,omitempty"` // pending running done reused skipped failed
+	Activity string         `json:"activity,omitempty"`
+	Output   string         `json:"output,omitempty"`
+	Branches []GraphBranch  `json:"branches,omitempty"`
+	Remote   map[string]any `json:"remote,omitempty"`
 }
 
 // GraphBranch is one sub-goal a Loop Forest step forked, as the graph draws it.
@@ -113,8 +114,14 @@ func (s *Service) graph(p *Plan, withVerify bool) (*Graph, error) {
 					n.Status = "reused"
 				}
 				n.Output = clip(strings.TrimSpace(stripStepTag(rec.Output)), 240)
-				if rec.Status == "running" {
+				if rec.Status == "running" || rec.Status == "waiting" || rec.Status == "unknown" {
 					n.Activity = rec.Activity
+				}
+				if c := rec.Call; c != nil {
+					n.Remote = map[string]any{"agent_id": c.Binding.AgentID, "node_execution_id": c.NodeExecutionID, "attempt": c.Attempt,
+						"request_id": c.RequestID, "task_id": c.RemoteTaskID, "context_id": c.ContextID, "status": c.Status,
+						"input_digest": c.InputDigest, "artifact_id": c.ArtifactID, "artifact_digest": c.ArtifactDigest,
+						"model_calls": len(c.ModelEvents), "agent_started_at": c.AgentStartedAt, "updated_at": c.UpdatedAt}
 				}
 				n.Branches = graphBranches(p.CaseID, rec.Branches)
 				if rec.Status == "running" && len(n.Branches) > 0 {

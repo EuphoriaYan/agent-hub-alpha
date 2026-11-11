@@ -1,13 +1,15 @@
 # Issue #16 构建与部署入口
 
-本目录先复现 W02 的授信尽调原型，用于验证 WorkSwarm → Go → Java 的部署和接口。
+本目录在 W02 授信尽调原型上接入真实 Agent Bus，验证 WorkSwarm → Go → Java Graph → Gateway DIRECT → 独立 Agent Runtime。
 原型来源为 [WangHaowen99/agent-hub-alpha @ 46980e8](https://github.com/WangHaowen99/agent-hub-alpha/tree/46980e84bf12e9a0fbfa860614822509bf299db5)，仅引入 `credit-demo`、`credit-orchestrator` 和必需的部署补丁，未合并整个 fork。
 
-**这不是已完成的 #16 年报 Demo。** 当前专业成员仍在 Java 进程内创建，未接 RDC/Gateway；业务数据为授信模拟材料；确认采用演示账号；完整年报核验、模型调用计数和 A01—A15 仍需集成验证。#6 是可选增强，不参与启动依赖。
+`--bus` 模式下，资料、分析、写作分别部署为三个 Runtime 进程；5 个普通专业节点经真实 RDC/Gateway 调用。原型的关联方 Loop Forest 和规则判断仍在 Java 宿主内。Go 保存正式结果和投影，Java Graph 仍是唯一执行推进者。
 
-下一步按 [Issue 16 Agent Bus 接入执行计划](../../../../docs/issue16-agent-bus-execution-plan.md) 推进：先接通远程 `report-writer`，再扩展三角色及故障验证。预计 5–7 人日，实施与验收均待执行；年报角色业务逻辑由 W06 提供。
+**本次完成范围是 Agent Bus 接入，业务数据仍为授信模拟材料。** W06 的年报提取、计算/引用核验和已验收报告交付不在此实现内，不能据此关闭 #16 的 A01—A15。#6 是可选增强，不参与启动依赖。
 
-## 本机验证记录（2026-11-11）
+实施与证据见 [Agent Bus 执行计划](../../../../docs/issue16-agent-bus-execution-plan.md) 和 [验收记录](../../../../docs/issue16-agent-bus-results.md)。分支 `feat/issue16-agent-bus`；可回滚基线 `5051d3a`。
+
+## 接入前的原型验证记录（2026-11-11）
 
 | 检查 | 结果 |
 | --- | --- |
@@ -27,7 +29,7 @@
 在仓库根目录执行（Linux x86_64，Docker/Compose、Git、Python 3、uv 0.11.7）：
 
 ```sh
-python3 agent-festival/go/cmd/credit-demo/deploy/demo.py build all
+python3 agent-festival/go/cmd/credit-demo/deploy/demo.py --bus build all
 ```
 
 也可将 `all` 换成 `go`、`java`、`ui`，逐个构建。构建不会启动业务服务或调用模型。
@@ -50,8 +52,8 @@ python3 agent-festival/go/cmd/credit-demo/deploy/demo.py build all
 ```sh
 # 使用文件时设置；已有环境变量时省略此行。
 export AHA_SECRETS_FILE=/absolute/path/to/secrets.env
-python3 agent-festival/go/cmd/credit-demo/deploy/demo.py start
-python3 agent-festival/go/cmd/credit-demo/deploy/demo.py status
+python3 agent-festival/go/cmd/credit-demo/deploy/demo.py --bus start
+python3 agent-festival/go/cmd/credit-demo/deploy/demo.py --bus status
 ```
 
 入口：`http://localhost:5192`。若首次出现模型配置引导，已有配置时点“跳过”。依次进入“专家 → 我的专家 → 授信编排助手”的详情页，点击“使用”。
@@ -75,9 +77,75 @@ python3 agent-festival/go/cmd/credit-demo/deploy/smoke_image.py
 ## 停止与状态
 
 ```sh
-python3 agent-festival/go/cmd/credit-demo/deploy/demo.py stop
+python3 agent-festival/go/cmd/credit-demo/deploy/demo.py --bus stop
 ```
 
 只停止 `agent-hub-issue16` 项目，保留命名数据卷。构建记录与验证证据写在缓存目录的 `evidence/` 下。
 
-后续集成顺序以 [Agent Bus 接入执行计划](../../../../docs/issue16-agent-bus-execution-plan.md) 为准：先以现有成员完成真实总线链路，再接入 W06 三角色并验证恢复和故障处理。年报材料、指标口径、报告核验及最终验收按 #16 的其他工作包推进。
+后续由 W01/W06 提供公开年报材料、三个角色的业务逻辑、独立参考答案和核验工具，沿本次已接通的 Runtime/Bus 接口替换授信场景配置。
+
+## Agent Bus 操作与验收
+
+完整接入模式使用 `--bus`；省略时仍可复现原型。`--bus start core` 启动总线、数据库、Go、Java 和三个 Runtime，完整 `--bus start` 同时启动 WorkSwarm。脚本会等待三个角色完成 RDC 发现。RDC/Gateway/Runtime 均只在 Compose 网络内开放，浏览器入口继续使用 `5192`。
+
+- 模型从现有 `SWARM_*` / DeepSeek 配置注入；三个专业 Runtime 使用同一模型配置，每节点独立上下文、MCP 挂载及只读权限。
+- 总线的四个内部凭据首次生成在 `${DEMO_CACHE}/bus-secrets.json`，权限 `600`；重部署保留此文件，也可由相同名称环境变量覆盖。更换数据库密码须同步数据库，不能只删除凭据文件。
+- 当前能力版本 `1.0.1`，A2A wire `1.0 JSON-RPC`，Runtime `0.1.4`，Core `0.1.17`，RDC/Gateway `0.1.3`。客户端为 JDK 21 HttpClient 窄适配器，只实现固定版本的 `SendMessage(returnImmediately)` / `GetTask`；没有另建 A2A 服务或注册中心。
+- RDC 使用原生 static instance reconciliation。每个实例明确指定 `route-key: /a2a`。该快照同卡片摘要时不更新 binding，因此改路由/契约配置必须发布新的能力版本并重新生成/确认计划，不能静默替换旧计划的绑定。
+- RDC 卡片响应为 `rawJson` 包装；按能力 ID 查询真实卡片和 `ONLINE` 实例。`/v2/agents` 在此快照的列表结果不用于替代业务白名单。
+- 此单机 Demo 的卡片发现限定 Docker 私网 CIDR，`verify-signatures: false`；Gateway 使用上游静态 credential directory，控制服务仍使用演示用户。这不是生产身份、签名验证或多租户资格。
+- Gateway 的租户环境变量须为 `GATEWAY_TEST_CREDENTIAL_TENANTID` / `...PRINCIPALID`，对应上游读取的 camelCase 属性。健康检查实际访问认证后的 A2A 接口，不能只用端口连通代替鉴权成功。
+
+正常演示会调用已配置模型并批准模拟任务，但不包含任何银行提交节点：
+
+```sh
+python3 agent-festival/go/cmd/credit-demo/deploy/smoke_bus.py normal
+python3 agent-festival/go/cmd/credit-demo/deploy/probe_bus.py
+```
+
+故障脚本只操作 `BUS_TEST_PROJECT` 指定的 Compose 项目（默认 `agent-hub-issue16`）。运行前停止其他业务测试。`host-kill`、`gateway-restart`、`runtime-restart` 注入对应进程故障。`disconnect`、`late`、`storage-failure` 需先加入测试代理 overlay，代理仍把实际请求发到真实 Gateway：
+
+```sh
+cd agent-festival/go/cmd/credit-demo/deploy
+python3 - <<'PY'
+import demo
+demo.BUS = True
+demo.compose('-f', demo.HERE/'compose.bus-test.yaml', 'up', '-d', '--no-build', '--wait', 'orchestrator', 'fault-proxy')
+PY
+python3 smoke_bus.py host-kill
+python3 smoke_bus.py disconnect
+python3 smoke_bus.py late
+python3 smoke_bus.py storage-failure
+python3 smoke_bus.py gateway-restart
+python3 smoke_bus.py runtime-restart
+python3 probe_bus.py --rdc-outage
+# 恢复直接 Gateway 地址；移除本测试代理。
+python3 demo.py --bus start
+# 此名称只对应默认项目；使用其他 BUS_TEST_PROJECT 时替换项目名。
+docker rm -f agent-hub-issue16-fault-proxy-1
+```
+
+`storage-failure` 会保存当前 `state.json` 为 `.bus-test-backup`，以目录占位使实际 atomic rename 失败，并在 `finally` 恢复原文件、重启 Go/宿主。若脚本本身被强杀，先停宿主，确认 `/data/state.json` 是测试空目录后删除该空目录，将备份改回原名，再启动 Go/宿主。不要在存在其他活动业务时运行此故障实验。
+
+状态与恢复：
+
+1. 宿主重启读取同一采纳图；已完成节点复用正式产物，未完成且有远端任务号的节点查询原任务。
+2. 断线、响应超时或派发后无回执显示等待/未知；在运行页以 `alice` 登录后点击“核对原任务并继续”。此操作保留原身份和尝试，绝不重新 SendMessage。启用 Bus 后，旧待确认计划如没有真实能力绑定，会要求重新生成和确认。
+3. Gateway 的任务归属索引及 Runtime 默认任务存储为内存实现。它们重启丢失原任务后，核对仍会等待，需人工处理。宿主恢复不等于这两个上游组件已经获得持久任务存储。
+4. Go 必需状态写入失败会恢复最后提交的内存快照、冻结后续写入并返回健康检查 503；修复存储并重启后以磁盘为准核对，不能跳过正式结果提交。
+5. 记录的模型计数是**在实际模型客户端调用前持久保存的尝试记录**，用于验证已完成节点恢复增量为零；不是供应商账单或所有网络重试次数。
+
+## 全新部署、备份与回滚
+
+另用干净项目和端口可重跑部署（相同镜像、独立卷；资源不足时先停当前项目）：
+
+```sh
+COMPOSE_PROJECT_NAME=agent-hub-issue16-fresh CREDIT_PORT=5291 CREDIT_SWARM_PORT=5292 python3 agent-festival/go/cmd/credit-demo/deploy/demo.py --bus start
+BUS_TEST_PROJECT=agent-hub-issue16-fresh BUS_TEST_BASE=http://127.0.0.1:5291 python3 agent-festival/go/cmd/credit-demo/deploy/smoke_bus.py normal
+```
+
+启动会同时保留 `credit-data`（结果）、`rdc-data`（PostgreSQL）及 `swarm-home`（WorkSwarm）。普通 `stop` 不删除卷；备份须在本项目停止写入后分别导出这三个卷，并保留私有 `bus-secrets.json`、模型配置来源与镜像清单。恢复须匹配代码/镜像和卷版本，避免拿旧服务覆盖含新调用记录的数据。
+
+本次实施前备份位于 `~/.cache/agent-hub-alpha/issue16/backups/20261111-184444/`，包含完整工作区、差异、原 `credit-data/` 与镜像 manifest；基线提交为 `5051d3a`。回退原型时先备份当前三个卷并停止当前项目，在单独 worktree 检出基线，用基线镜像和备份数据启动，省略 `--bus`；保留现有总线卷以便返回本分支。不能只切代码而继续改写同一个新格式结果卷。
+
+新增组件实测稳态约 1 GiB（3 个专业 Runtime、RDC、Gateway、数据库合计，详见证据 `resources.json`）。Compose 分别限制 420/420/420/420/320/192 MiB；宿主 512 MiB。此数值不包含 WorkSwarm、Go、其他机器服务或构建峰值；应为构建和并行任务额外预留内存。

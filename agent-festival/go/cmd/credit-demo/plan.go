@@ -51,22 +51,23 @@ type Precheck struct {
 
 // Plan is one immutable version of the f proposed for a case.
 type Plan struct {
-	ID         string           `json:"id"`
-	Version    int              `json:"version"`
-	CaseID     string           `json:"case_id"`
-	Goal       string           `json:"goal"`
-	Agents     []PlanAgent      `json:"agents"`
-	Blueprint  string           `json:"blueprint_yaml"`
-	SpecDigest string           `json:"spec_digest"`
-	Team       []map[string]any `json:"team"`
-	Type       string           `json:"type"`
-	Steps      []Step           `json:"steps"`
-	Layers     [][]string       `json:"layers"`
-	Precheck   Precheck         `json:"precheck"`
-	Hash       string           `json:"hash"`
-	ProposedAt string           `json:"proposed_at"`
-	ApprovedBy string           `json:"approved_by,omitempty"`
-	RunID      string           `json:"run_id,omitempty"`
+	ID          string                `json:"id"`
+	Version     int                   `json:"version"`
+	CaseID      string                `json:"case_id"`
+	Goal        string                `json:"goal"`
+	Agents      []PlanAgent           `json:"agents"`
+	Blueprint   string                `json:"blueprint_yaml"`
+	SpecDigest  string                `json:"spec_digest"`
+	Team        []map[string]any      `json:"team"`
+	Type        string                `json:"type"`
+	Steps       []Step                `json:"steps"`
+	Layers      [][]string            `json:"layers"`
+	Precheck    Precheck              `json:"precheck"`
+	Hash        string                `json:"hash"`
+	ProposedAt  string                `json:"proposed_at"`
+	ApprovedBy  string                `json:"approved_by,omitempty"`
+	RunID       string                `json:"run_id,omitempty"`
+	BusBindings map[string]BusBinding `json:"bus_bindings,omitempty"`
 }
 
 func (p *Plan) Key() string { return fmt.Sprintf("%s-v%d", p.ID, p.Version) }
@@ -173,7 +174,7 @@ func (s *Service) compile(agents []PlanAgent) (*compileResult, []map[string]any,
 
 func expertInstruction(e *Expert) string {
 	if e.Kind == "judge" {
-		return "你是风险判断员（S1），按已发布的授信判断规约给出结构化判断。"
+		return "你是风险判断员，按已发布的授信判断规约给出结构化判断。"
 	}
 	if e.Kind == "effect" {
 		return "你是授信申请提交节点，只按已采纳的判断经网关提交申请。"
@@ -371,6 +372,9 @@ func planHash(p *Plan, contractHashes map[string]string) string {
 	members := map[string]any{}
 	for _, a := range p.Agents {
 		members[a.ID] = map[string]any{"expert": a.Expert, "contract_hash": contractHashes[a.Expert]}
+		if b, ok := p.BusBindings[a.ID]; ok {
+			members[a.ID].(map[string]any)["bus_binding"] = b
+		}
 	}
 	raw, _ := rfc8785.Canonicalize(jsonDoc(map[string]any{"case": p.CaseID, "goal": p.Goal, "spec_digest": p.SpecDigest, "members": members}))
 	sum := sha256.Sum256(raw)
