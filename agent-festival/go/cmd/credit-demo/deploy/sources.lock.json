@@ -1,0 +1,12 @@
+{
+  "prototype": {"url": "https://github.com/WangHaowen99/agent-hub-alpha.git", "commit": "46980e84bf12e9a0fbfa860614822509bf299db5"},
+  "sources": {
+    "agent-solution": {"url": "https://gitcode.com/openJiuwen/agent-solution.git", "commit": "bf702bc95064d3491cf8b374f54d271363d84230"},
+    "workswarm": {"url": "https://github.com/openJiuwen-ai/jiuwenswarm.git", "commit": "1142e5fb3984a2b1bc6352669a464976e204b2dc"}
+  },
+  "go": {"version": "1.25.0", "url": "https://go.dev/dl/go1.25.0.linux-amd64.tar.gz", "sha256": "2852af0cb20a13139b3448992e69b868e50ed0f8a1e5940ee1de9e19a123b613"},
+  "java_core_maven": "com.openjiuwen:agent-core-java:0.1.17",
+  "solution_version": "0.1.3",
+  "workswarm_uv": "0.11.7",
+  "workswarm_protocol_fetch": {"ref": "refs/merge-requests/391/head", "commit": "4c5f3e9eb41bd33d34d012b06a3e364e8497ac11", "reason": "GitCode PR-only commit; uv.lock resolved commit remains unchanged"}
+}
