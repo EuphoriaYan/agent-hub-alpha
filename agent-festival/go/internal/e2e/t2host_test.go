@@ -88,9 +88,17 @@ func newResultStore(dir string) (*resultStore, error) {
 	return rs, nil
 }
 
+// put stores a result under opID. Batch-0 #2 (commit-side o-key dedup):
+// CommittedResults(o)≤1 is now an explicit guard — a second put for an
+// already-committed opID with a different digest returns ErrAlreadyCommitted
+// instead of silently overwriting (the schema's "conforming by construction"
+// depends on adoption ⊆ ledger; the store enforces it at the commit point).
 func (rs *resultStore) put(opID string, r storedResult) error {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
+	if prev, ok := rs.data[opID]; ok && prev.Receipt != r.Receipt {
+		return fmt.Errorf("ErrAlreadyCommitted: opID %q already has a committed result with digest %q (CommittedResults(o)≤1; new digest %q rejected — same-material retry should use serve, new-material should use a new op)", opID, prev.Receipt, r.Receipt)
+	}
 	rs.data[opID] = r
 	raw, err := json.MarshalIndent(rs.data, "", "  ")
 	if err != nil {
@@ -104,6 +112,22 @@ func (rs *resultStore) get(opID string) (storedResult, bool) {
 	defer rs.mu.Unlock()
 	r, ok := rs.data[opID]
 	return r, ok
+}
+
+// queryForReconciliation is the batch-0 #3 read-face API (matrix row 6:
+// "Go 可返回某个请求待核对，不得变成第二个全图执行器"). It answers the ONE
+// question recovery needs — "does this o have a committed result, and is it
+// the same material?" — without any scheduling side effect. The caller
+// (W04/Runtime recovery logic) uses this to decide: serve (same κ), conflict
+// (different κ), or re-execute (no committed result).
+func (rs *resultStore) queryForReconciliation(opID, receiptDigest string) (committed bool, serve bool, stored storedResult) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	r, ok := rs.data[opID]
+	if !ok {
+		return false, false, r
+	}
+	return true, r.Receipt == receiptDigest, r
 }
 
 // lookupByBusinessRequest finds the LATEST result for a business request
