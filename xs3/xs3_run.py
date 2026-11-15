@@ -14,6 +14,14 @@
 """
 import argparse, json, os, sys, time, pathlib
 
+def _mint_attempt_id():
+    """One ID per request lifecycle (PENDING row and terminal row share it
+    when the caller pre-minted; the ledger stays append-only — two rows,
+    one lifecycle)."""
+    import uuid as _uuid
+    return _uuid.uuid4().hex[:8]
+
+
 def _prompt_digest(text):
     """Prompt content digest (sha256 12-hex) — acceptance 2: one row can
     identify which input file ran."""
@@ -66,6 +74,20 @@ def main():
         conf["endpoint"], data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     t0 = time.time()
+    # R10 acceptance-2 completion (125号 B 级): the attempt ID is minted and a
+    # PENDING row is written BEFORE the request leaves — a hard-kill window
+    # (SIGKILL between urlopen and the old log-at-completion call) used to
+    # leave zero rows. The PENDING row shares the schema; every terminal path
+    # (parse-fail exit / HTTP-fail exit / COMPLETE / INCOMPLETE) appends its
+    # own new-ID row alongside (append-only stays true — PENDING is a
+    # lifecycle record, not an overwrite).
+    _aid = _mint_attempt_id()
+    log_attempt(a.arm, conf, None, "PENDING", t0,
+                prompt_digest=_prompt_digest(prompt), cells=_cells_used(prompt),
+                proto=ARMS[a.arm].get("proto", ""),
+                temperature=ARMS[a.arm].get("temperature"),
+                max_tokens=ARMS[a.arm].get("max_tokens"),
+                attempt_id=_aid)
     try:
         with urllib.request.urlopen(req, timeout=600) as r:
             raw = json.loads(r.read())
@@ -159,7 +181,8 @@ def cells_from_prompt(prompt_text: str) -> str:
 
 
 def log_attempt(arm, conf, raw, status, t0, content="", reasoning_len=0,
-                prompt_digest="", cells="", proto="", temperature=None, max_tokens=None):
+                prompt_digest="", cells="", proto="", temperature=None, max_tokens=None,
+                attempt_id=None):
     """RV25-02 fix: unique attempt ID (uuid prefix — same-second/same-arm can
     never overwrite; codex uuid_v7 precedent) + append-only ('x' mode — an
     existing name is a bug, refusing loudly beats replacing a record) + the
@@ -168,7 +191,7 @@ def log_attempt(arm, conf, raw, status, t0, content="", reasoning_len=0,
     import uuid as _uuid
     OUT.mkdir(exist_ok=True)
     ts = time.strftime("%Y%m%d-%H%M%S")
-    aid = _uuid.uuid4().hex[:8]
+    aid = attempt_id or _uuid.uuid4().hex[:8]
     rec = {
         "attempt_id": f"{ts}-{aid}", "ts": ts, "arm": arm,
         "model": conf["model"], "version_pin": conf["version_pin"],
