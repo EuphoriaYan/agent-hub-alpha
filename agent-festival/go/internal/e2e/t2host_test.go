@@ -483,7 +483,7 @@ func (h *t2Host) reopen() *t2Host {
 // records the real one. R12' review found this MAJOR; this is the fix).
 func requestForT2(op, revision, evidence, digest, brID string) *adopt.Request {
 	return &adopt.Request{
-		AdoptionVersion:  "0.1.0",
+		AdoptionVersion: "0.2.0",
 		Identity:         ledger.Identity{BusinessRequestID: brID, EvaluationRevision: revision, OperationID: op},
 		Versions:         ledger.Versions{Evidence: evidence, Rule: "rule-credit-v1", Model: "s1-standin", Readout: "r-1", Policy: "p-1"},
 		PayloadDigest:    digest,
