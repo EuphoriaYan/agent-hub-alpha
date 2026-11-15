@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claim gate v2.6.1: counting-closure claims must carry command evidence nearby.
+"""Claim gate v2.6.2: counting-closure claims must carry command evidence nearby.
 
 The write-path discipline (runbook §五 rule 1: 数字先跑后写) in mechanical
 form. Historical incidents this gate family exists for (all real, all in
@@ -8,11 +8,12 @@ this campaign): 56号「17 个新提交」(actual 18), 「12 测试全绿」(act
 「11 处+1 删除」(actual 151 deletions) — every one a count written from
 memory with no command run at write time.
 
-Current execution scope (v2.6.1, unchanged from v2.6): only constrained
+Current execution scope (v2.6.2, unchanged from v2.6): only constrained
 wc/grep commands may be replayed. All git commands are reported as
-SKIPPED-UNSAFE (git-replay-disabled), never executed. v2.6.1 is a
-detection-set BUGFIX only (CMD branch single-source). Historical version
-notes below describe older behavior, not the current execution surface.
+SKIPPED-UNSAFE (git-replay-disabled), never executed. v2.6.1/v2.6.2 are
+detection-set BUGFIXES only (CMD branch single-source; scoped
+rerun-selection fix). Historical version notes below describe older
+behavior, not the current execution surface.
 
 Usage:
     python3 tools/claim_gate.py FILE...           # list violations, rc=1 if any
@@ -499,6 +500,23 @@ reopen a CLOSED form):
     `find tools -name` backticks ARE evidence; the real-doc carrier
     form 「（`ls gate-attack-samples/`＝12 个 s*.md…）」 passes. Execution
     surface unchanged from v2.6.
+  CLOSED in v2.6.2 (inner-loop remediation — redteam-0 of the two-chamber
+    inner review): the rerun-tier evidence-command SELECTION was hijacked
+    by v2.6.1's own fix — newly admitted ls/find backtick spans became
+    top-down-FIRST picks, _guard refused them (not-whitelisted), and
+    executed verdicts silently degraded to SKIPPED-UNSAFE (rc untouched) —
+    a later whitelisted command that WOULD have been replayed (catching the
+    pasted value drift) was never evaluated (three-version repro: v2.6
+    RERUN-MISMATCH rc=1 → v2.6.1 SKIPPED rc=0). The fix is SCOPED to
+    respect RR13's pinned determinism law (top-down FIRST over the
+    v2.6-era match set, "never the runnable one"): exactly the
+    newly-admitted backtick members (ls/find — frozen historical set
+    _V26_BACKTICK_TOOLS) do not participate in selection priority; they
+    remain as fallback, so ls-only windows keep an informative
+    SKIPPED-UNSAFE verdict. Pins: RR75 (leading ls + drifted wc paste →
+    RERUN-MISMATCH, executed), RR76 (ls-only window → SKIPPED-UNSAFE
+    not-whitelisted), RR13 unchanged (determinism preserved). Execution
+    surface unchanged (whitelist still grep -c / wc -l only).
 
   STILL OPEN (advisory, documented — the closed-set boundary record, both
     faces: killed FPs and newly-opened escapes) — the severity-count idiom
@@ -981,6 +999,15 @@ RERUN_READONLY = (
     ("grep", "-c"),
     ("wc", "-l"),
 )
+# v2.6.2 (inner-loop redteam-0): the v1.8–v2.6 backtick-branch tool set —
+# frozen HISTORICAL fact. v2.6.1's single-source unified the two CMD
+# branches and thereby admitted ls/find into the BACKTICK form for the
+# first time (the line-start branch had them since v1.8). The rerun-tier
+# SELECTION passes over exactly those newly-admitted backtick members: RR13
+# pins top-down-FIRST over the v2.6-era match set ("never the runnable
+# one"), and the admission must not silently change WHICH command a doc's
+# verdict hangs on.
+_V26_BACKTICK_TOOLS = ("git", "go", "grep", "python3", "curl", "wc", "diff", "cd")
 _RETIRED_GIT_MEMBERS = (("git", "rev-parse"), ("git", "log"), ("git", "ls-tree"))
 # census AXIS2 keeps watching the RETIRED trio: re-adding any of them to
 # RERUN_READONLY without removing the _guard retirement is a no-op (still
@@ -1502,12 +1529,34 @@ def rerun_verdicts(path: str, timeout=None):
         lo = max(0, i - WINDOW)
         hi = min(len(lines), i + WINDOW + 1)
         ci = None
-        for j in range(lo, hi):                      # deterministic: top-down FIRST
+        fallback = None
+        # v2.6.2 (inner-loop redteam-0): v2.6.1's CMD single-source newly
+        # admitted ls/find into the BACKTICK form of the detection set, and
+        # the top-down FIRST pick then selected a leading `ls …` carrier
+        # line as THE evidence command — _guard refused it (not-whitelisted)
+        # and the verdict silently degraded to SKIPPED-UNSAFE (rc untouched):
+        # a later whitelisted command that v2.6 WOULD have replayed (catching
+        # the pasted value drift) was never evaluated. RR13 pins top-down
+        # FIRST over the v2.6-era match set ("never the runnable one"), so
+        # the fix is SCOPED: exactly the newly-admitted backtick members do
+        # not participate in selection priority (they stay as fallback, so
+        # an ls-only window keeps an informative SKIPPED verdict). Pins:
+        # RR75 (restoration), RR76 (fallback), RR13 (unchanged).
+        for j in range(lo, hi):
             if lines[j].strip().startswith("```"):
                 continue
-            if CMD.search(lines[j]):
-                ci = j
-                break
+            m = CMD.search(lines[j])
+            if not m:
+                continue
+            tool = (m.group(1) or m.group(2) or "").strip()
+            if m.group(2) is not None and tool not in _V26_BACKTICK_TOOLS:
+                if fallback is None:
+                    fallback = j
+                continue
+            ci = j
+            break
+        if ci is None:
+            ci = fallback
         if ci is None:
             continue
         cmd, expected = _evidence_command(lines, ci, fences)
@@ -1600,6 +1649,12 @@ RERUN_CASES = [
      {"data.txt": _GREP2}, {}),                                        # matrix RR04/RR06 dual shape
     ("RR04d-path-disguise", "SKIPPED-UNSAFE", "path-disguise", ["```", "cd . && /usr/bin/wc -l data.txt", "10 data.txt", "```", "本批共 10 行。"],
      {"data.txt": _D10}, {}),
+    ("RR75-selection-preference", "RERUN-MISMATCH", None,
+     ["（`ls samples/` 产物清单见下）", "```", "wc -l data.txt", "11 data.txt", "```", "本批共 10 行。"],
+     {"data.txt": _D10}, {}),   # v2.6.2 redteam-0: the leading `ls` backtick (a v2.6.1-admitted detection member, NOT rerunnable) must not displace the whitelisted wc — the drift paste (11 vs actual 10) is executed and caught. Pre-v2.6.2 this case degraded to SKIPPED-UNSAFE/not-whitelisted (executed=0, drift never evaluated).
+    ("RR76-ls-fallback", "SKIPPED-UNSAFE", "not-whitelisted",
+     ["（`ls samples/` 产物清单）", "本批共 10 行。"],
+     {"data.txt": _D10}, {}),   # v2.6.2 fallback semantics: an ls-only window keeps the FIRST hit → refused not-whitelisted (informative skip; v2.6-era this doc had no CMD hit at all)
     ("RR04e-subst", "SKIPPED-UNSAFE", "shell-metachar", ["```", "wc -l $(echo data.txt)", "10 data.txt", "```", "本批共 10 行。"],
      {"data.txt": _D10}, {}),
     ("RR05a-slow", "SKIPPED-TIMEOUT", None, ["```", "grep -c x fifo", "2", "```", "本批共 10 行。"],
