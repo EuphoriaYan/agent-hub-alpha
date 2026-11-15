@@ -923,6 +923,65 @@ func TestT2Lookup_RevisionOrdering(t *testing.T) {
 	}
 }
 
+// TestT2Store_PutDedupGuard probes batch-0 #2 (CommittedResults(o)≤1 at
+// the commit point): a second put for an already-committed opID with a
+// DIFFERENT receipt is rejected with ErrAlreadyCommitted and the
+// committed result is retained; the SAME receipt re-put is the
+// idempotent serve path and must stay green. Mutation probe: delete the
+// prev.Receipt != r.Receipt guard in put and the different-receipt legs
+// of this test fail.
+func TestT2Store_PutDedupGuard(t *testing.T) {
+	rs, err := newResultStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rs.put("op-dedup", storedResult{Receipt: "r-kappa-1", BusinessReqID: "br-dedup", EvaluationRev: "er-1"}); err != nil {
+		t.Fatal(err)
+	}
+	// different material (κ₂≠κ₁): conflict — rejected, original retained
+	err = rs.put("op-dedup", storedResult{Receipt: "r-kappa-2", BusinessReqID: "br-dedup", EvaluationRev: "er-1"})
+	if err == nil || !strings.Contains(err.Error(), "ErrAlreadyCommitted") {
+		t.Fatalf("batch0#2 probe: different-receipt re-put = err %v, want ErrAlreadyCommitted — a silent overwrite would break CommittedResults(o)≤1", err)
+	}
+	if r, ok := rs.get("op-dedup"); !ok || r.Receipt != "r-kappa-1" {
+		t.Fatalf("batch0#2 probe: stored receipt = %q (ok=%v), want r-kappa-1 — a rejected put must NOT overwrite the committed result", r.Receipt, ok)
+	}
+	// same material (κ match): idempotent re-put is the serve path
+	if err := rs.put("op-dedup", storedResult{Receipt: "r-kappa-1", BusinessReqID: "br-dedup", EvaluationRev: "er-1"}); err != nil {
+		t.Fatalf("batch0#2 probe: same-receipt re-put = err %v, want nil — same-material retry is the serve path, not a conflict", err)
+	}
+}
+
+// TestT2Store_ReconciliationThreeStates probes batch-0 #3 (matrix row 6
+// read face): queryForReconciliation answers the three recovery states —
+// no committed result (re-execute), committed+same digest (serve),
+// committed+different digest (conflict). Mutation probe: force the serve
+// verdict to constant true and the different-digest leg fails; force the
+// committed verdict to constant true and the missing-op leg fails.
+func TestT2Store_ReconciliationThreeStates(t *testing.T) {
+	rs, err := newResultStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// state 1: nothing committed → (false, false) — recovery re-executes
+	if c, s, _ := rs.queryForReconciliation("op-recon", "r-kappa-1"); c || s {
+		t.Fatalf("batch0#3 probe: missing op = (%v,%v), want (false,false) — no committed result means re-execute, not serve", c, s)
+	}
+	if err := rs.put("op-recon", storedResult{Receipt: "r-kappa-1", BusinessReqID: "br-recon", EvaluationRev: "er-1"}); err != nil {
+		t.Fatal(err)
+	}
+	// state 2: committed + same digest → (true, true) — recovery serves
+	if c, s, r := rs.queryForReconciliation("op-recon", "r-kappa-1"); !c || !s || r.Receipt != "r-kappa-1" {
+		t.Fatalf("batch0#3 probe: same-digest query = (%v,%v), want (true,true) — same κ is the serve path", c, s)
+	}
+	// state 3: committed + different digest → (true, false) — conflict,
+	// NOT serve: a constant-true serve verdict would hand the recovery
+	// side the wrong material
+	if c, s, r := rs.queryForReconciliation("op-recon", "r-kappa-2"); !c || s || r.Receipt != "r-kappa-1" {
+		t.Fatalf("batch0#3 probe: different-digest query = (%v,%v), want (true,false) — different κ must surface as conflict, not serve", c, s)
+	}
+}
+
 // TestT2Lookup_TieBreakDeterminism probes L43: when two results share the
 // SAME revision, the winner is the lexicographically-lowest operation_id
 // (sortedKeys + strict >), and the winner is STABLE across iterations —
