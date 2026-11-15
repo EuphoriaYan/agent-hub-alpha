@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claim gate v2.6: counting-closure claims must carry command evidence nearby.
+"""Claim gate v2.6.1: counting-closure claims must carry command evidence nearby.
 
 The write-path discipline (runbook §五 rule 1: 数字先跑后写) in mechanical
 form. Historical incidents this gate family exists for (all real, all in
@@ -8,10 +8,11 @@ this campaign): 56号「17 个新提交」(actual 18), 「12 测试全绿」(act
 「11 处+1 删除」(actual 151 deletions) — every one a count written from
 memory with no command run at write time.
 
-Current execution scope (v2.6): only constrained wc/grep commands may be
-replayed. All git commands are reported as SKIPPED-UNSAFE
-(git-replay-disabled), never executed. Historical version notes below
-describe older behavior, not the current execution surface.
+Current execution scope (v2.6.1, unchanged from v2.6): only constrained
+wc/grep commands may be replayed. All git commands are reported as
+SKIPPED-UNSAFE (git-replay-disabled), never executed. v2.6.1 is a
+detection-set BUGFIX only (CMD branch single-source). Historical version
+notes below describe older behavior, not the current execution surface.
 
 Usage:
     python3 tools/claim_gate.py FILE...           # list violations, rc=1 if any
@@ -486,6 +487,19 @@ reopen a CLOSED form):
         self-claim (pin counts, key diffs, flip counts) is re-measured per
         round by running the tool, and numbers quoted in fix reports are
         run output, never copied forward.
+  CLOSED in v2.6.1 (external-campaign bugfix MR — engineering chamber; the
+    adjudication chamber for detection-set EXTENSIONS is a separate followup
+    MR): the CMD two-branch whitelist split (family-wide since v1.8; measured
+    real carrier: a counting claim whose evidence is a SAME-LINE
+    `ls …` backtick was rejected as "no command in the ±8 window"). Both
+    branches are now DERIVED from one _CMD_TOOLS tuple (the P-Ⅰ
+    single-source law, UNITS precedent) — future branch divergence is
+    inexpressible. Detection-set only: membership grants NO --rerun
+    execution. Pins: bare `ls` stays non-evidence; `ls samples/` /
+    `find tools -name` backticks ARE evidence; the real-doc carrier
+    form 「（`ls gate-attack-samples/`＝12 个 s*.md…）」 passes. Execution
+    surface unchanged from v2.6.
+
   STILL OPEN (advisory, documented — the closed-set boundary record, both
     faces: killed FPs and newly-opened escapes) — the severity-count idiom
     (「0B+2M+8m」「B=1 M=2」) is OUTSIDE the counting domain by adjudication:
@@ -736,9 +750,19 @@ COUNTING = re.compile(
    # inexpressible) — the gate's own motivating disease form "12 测试全绿" (56号, actual 11)
    # now matches; v2.0: digit slot only — the units group text is byte-unchanged.
 TRIPLE = re.compile(r"\b[MDA]\s*=\s*\d+")
+# v2.6.1 (engineering-chamber bugfix): the two CMD branches below were
+# hand-maintained mirrors that silently diverged — the backtick branch lacked
+# ls/find while the line-start branch had them (family-wide since v1.8;
+# measured carrier: a counting claim whose evidence is a SAME-LINE `ls …`
+# backtick was rejected as "no command in the ±8 window"). Both branches are
+# now DERIVED from one tool tuple (the P-Ⅰ single-source law, same precedent
+# as UNITS from COUNTING) — future branch divergence is inexpressible.
+# Detection-set only: membership here does NOT grant --rerun execution
+# (RERUN_READONLY governs that surface).
+_CMD_TOOLS = ("git", "go", "grep", "python3", "curl", "wc", "diff", "cd", "ls", "find")
 CMD = re.compile(
-    r"^\s*(git |go |grep |python3 |curl |wc |diff |cd |ls |find )"
-    r"|`(git|go|grep|python3|curl|wc|diff|cd)\s+[^`]*`"
+    r"^\s*(" + "|".join(t + " " for t in _CMD_TOOLS) + r")"
+    r"|`(" + "|".join(_CMD_TOOLS) + r")\s+[^`]*`"
 )
 WINDOW = 8  # evidence-command window, ±WINDOW lines BOTH directions
 
@@ -825,6 +849,10 @@ SELFTEST = [
     # (text, should_flag) — the executable boundary spec; singularity 2026-11-09.
     ("本批与基线子树零差异，全部一致。", False),          # OPEN: closure words without digits
     ("经 `git` 复核，恰 7 处差异。", True),               # CLOSED v1.2: bare backtick ≠ evidence
+    ("经 `ls` 复核，恰 7 处差异。", True),                # v2.6.1: bare `ls` (no space+args) still ≠ evidence — the fix must not newly pass the bare form
+    ("复核产物见下，`ls samples/` 共 12 个文件。", False),   # v2.6.1: backtick `ls` with args IS evidence — two-branch whitelist split (line-start had ls/find, backtick lacked them since v1.8) killed by the _CMD_TOOLS derivation; deleting the derivation flips this and the find twin
+    ("清单经 `find tools -name` 复核，本批共 3 处新增。", False),   # v2.6.1: backtick `find` twin
+    ("（`ls gate-attack-samples/`＝12 个 s*.md＋coresha.txt 数据文件）", False),   # v2.6.1: the real-doc carrier form — same-line `ls` backtick was wrongly judged evidence-less (measured on a live campaign ledger)
     ("git status\n本批共 9 项新增。", False),            # OPEN: presence-form (unrelated cmd satisfies)
     ("汇总 M = 11、D = 151。", True),                    # CLOSED v1.2: spaced triple
     ("the batch adds 21 items.", False),                 # OPEN: English counts
