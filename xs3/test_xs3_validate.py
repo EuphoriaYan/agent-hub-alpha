@@ -13,8 +13,9 @@
   C attempt 生命周期族 —— 同秒双发不覆盖('x'+uuid)/同名拒绝覆写/一行重建运行条件
   D 解析路径族        —— 强杀窗口 PENDING 在案/畸形体入台账不裸崩/非 str 归一/
                         anthropic blocks 真形分支（R11-F1）/HTTP 失败终态入台账（R11-M1
-                        ——四终态路径全覆盖）/choices 分支正控（R11-r3-M1——双解析
-                        分支×终态矩阵满格）/请求体 sampling 面（R11-r4-M1——body
+                        ——四终态路径全覆盖）/choices 分支正控（R11-r3-M1——双解析分支×
+                        终态矩阵补格，anthropic×INCOMPLETE 为已裁不报格）/请求体
+                        sampling 面（R11-r4-M1——body
                         与台账同源契约的 body 侧）
   E 正控             —— 真形五格/六格 COMPLETE、ASCII 竖杠形、摘要钉
 
@@ -136,7 +137,7 @@ def c_row_reconstructs_run():
 
 # ── D. 解析路径族（mock 整跑 main——邢 F1 回执验证脚本形态） ──────────
 
-def _mocked_run(td, response_body=None, urlopen_side_effect=None, prompt_text=FIVE_GRID_PROMPT):
+def _mocked_run(td, response_body=None, urlopen_side_effect=None, prompt_text=FIVE_GRID_PROMPT + "\n"):
     """在临时目录内整跑 main()：钉死时钟、注入钥匙/argv、拦截 urlopen。"""
     RUN.OUT = pathlib.Path(td)
     prompt_file = pathlib.Path(td) / "prompt.md"
@@ -222,7 +223,7 @@ def d_choices_branch_positive():
                 and statuses.count("COMPLETE") == 1)
 
 def d_request_body_matches_arms():
-    """R11-r4-M1 修复：请求体 sampling 面首钉——body 三键==ARMS 单源值+prompt
+    """R11-r4-M1 修复：请求体 sampling 面首钉——body 键集穷尽（恰四键）+各键==ARMS 单源值+prompt
     原文（v1.1「body 与台账同源」契约的 body 侧；台账侧=C3）。temperature=0 是
     差分对照控制变量：body 漂移则 attempt 行为错误 body 作证且无产物可对勘
     （raw 只存响应不存请求）。闭包捕获真 Request 对象，请求前捕获即杀。"""
@@ -235,10 +236,11 @@ def d_request_body_matches_arms():
         body = captured.get("body", {})
         return (exit_seen == "KILL" and len(rows) == 1
                 and rows[0]["status"] == "PENDING"
+                and set(body) == {"model", "temperature", "max_tokens", "messages"}
                 and body.get("model") == "qwen3.8-flash"
                 and body.get("temperature") == 0
                 and body.get("max_tokens") == 32768
-                and body.get("messages") == [{"role": "user", "content": FIVE_GRID_PROMPT}])
+                and body.get("messages") == [{"role": "user", "content": FIVE_GRID_PROMPT + "\n"}])
 
 def d_http_failure_lands_ledger():
     """R11-M1(M) 修复：HTTP 失败终态路径（except Exception→FAILED 落行+exit）首
@@ -256,7 +258,7 @@ def d_http_failure_lands_ledger():
         failed = [r for r in rows if r["status"].startswith("FAILED:")]
         return (isinstance(exit_seen, SystemExit) and len(rows) == 2
                 and statuses.count("PENDING") == 1 and len(failed) == 1
-                and failed[0]["prompt_digest"] == "8ad2a54c2168"
+                and failed[0]["prompt_digest"] == "7c89b1a1548b"
                 and failed[0]["cells"] == FIVE)
 
 
