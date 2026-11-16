@@ -267,7 +267,7 @@ func (s *Service) BeginCall(in CallCommand) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("node has no approved remote capability")
 	}
-	digest, err := canonicalHash(map[string]any{"input": in.Input, "goal": in.Goal, "binding": binding, "model": s.cfg.Model})
+	digest, err := canonicalHash(map[string]any{"input": in.Input, "goal": in.Goal, "binding": binding, "model": s.runModel(r)})
 	if err != nil {
 		return nil, err
 	}
