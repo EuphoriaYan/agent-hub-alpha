@@ -1359,3 +1359,37 @@ N/A）。判据 63（替换件自检）自此有执行面。**电池红必须是
 | F3 | put 守卫错误形态伪 sentinel——`ErrAlreadyCommitted:` 字符串前缀，既非 `var ErrXxx = errors.New(...)` 可 errors.Is，也不合本文件方括号 tag 惯例（`[T2.RESULT_STORE]` 等 6 处先例） | m | 行为面（未来 W04 需分叉 conflict/IO 失败；当前零消费者） | 改真 sentinel 后写 `errors.Is` 探针（现形态写不出）——授权后一次小改 |
 | F4 | put 先内存后文件：WriteFile 失败时 map 已更新——守卫信幻影 prev、查询 API 报幻影 committed（重启消失）；既有形状，本提交新增 (b) 面 | m | 行为面（恢复方；当前零消费者；方向 fail-closed 不放大冲突） | 确定性：TempDir 内把 store 文件路径做成目录→put(A) 得 err→put(B) 现得 ErrAlreadyCommitted（幻影）；修法=写失败回滚 map 或持久化后才认 committed |
 | F5 | 注释「the store enforces it at the commit point」承诺域宽于实态——单实例顺序语义（跨实例双 host 同 dir 互不可见；store 仍是扁平键，同逻辑 o 不同 flat 键不设防；fixture Receipt 是自由串非摘要） | m | 决策面（邢读 PR 注释；行为在顺序 reopen 下正确=夸大封顶 m） | 跨实例探针：同 dir 两并存 store 各 put 不同 Receipt→双双成功；或注释收窄承诺域一次小改 |
+
+## R10 补登（2026-11-15，F7 授权执行批——134号）
+
+| # | 项 | 处置 |
+|---|---|---|
+| F7 | xs3 validate 红探针电池未落仓（114号 §二，count-drift 族无永久闸） | **已清偿**：`xs3/test_xs3_validate.py` 16 案四族（aef1513），变异杀灭 8/8，8 连跑稳定，推送树同形 16/16；触发条件=xs3_run.py 被触碰必跑（夏方模板交叉实验启动前） |
+| F1 | xs3 validate 空集恒 True（114号 §二候授权标记） | **销账（过时标记）**：RV25 修复批已结构性退役——邢三命令跑当前树 empty/no_basis/contradiction 全 False（134号 §五 机判） |
+| 翻面连带杀 | claim_gate v2.6 三条非 git 规则（stem 截断比对/执行输出零回显/语法表 fail-closed）丢最后翻面 carrier（117号 §三.1，断言恒真化） | **决定不做**（用户裁定 2026-11-15）：冻结态+雕花熔断立法优先；变更门兜底（未来任何解冻必须过 census 重跑+变异自测，翻面恢复=解冻义务）；本行=台账登记补位（原仅记在 117号 档，防漏） |
+
+## R11 电池轮 minor 登记（2026-11-15，对象=xs3 电池 aef1513——外层 0B/1M/4m，M 已修 fba2d38）
+
+| # | finding | 级 | 消费者面 | 处置 |
+|---|---|---|---|---|
+| F2 | validate 空白形子句（group(1)/(2).strip()）无 Case 驱动——纯空白判定/依据变异下被 ACCEPT | m | 决策（角落输入形） | 积累不修（修复=补两空白形案，随下次触电池时） |
+| F3 | 三处死构造（m=_spec 无引用假注释/恒空 **kwargs/RUN.OUT 死存储） | m | 零消费者 | 积累不修 |
+| F4 | C3 超契约钉（attempt_id 连字符三段式）+欠断言（proto/version_pin/arm/ts 未钉） | m | 决策（弱） | 积累不修 |
+| F5 | 预铸位（_mint_attempt_id）唯一性无探针——危害被 'x' 守卫（C2 已测）有界 | m | 零（有界） | 积累不修（终版矩阵如实未声称覆盖） |
+
+| R11-M1 | 电池漏 HTTP 失败终态路径（SUT 四终态盖三） | **已修**：D5 案（四终态全覆盖） |
+| R11-m1 | main→log_attempt 接线缝（digest/cells 传参）无断言 | **随 D5 闭**（FAILED 行字段钉） |
+
+| R11-r3-m1 | log_attempt 尾部 raw/reply 留档落盘零断言（首译呈回凭证面；reasoning 提取同族） | m | 积累不修（F4 欠断言族并档） |
+| R11-r3-m2 | parse-fail except 五类型仅 ValueError 被 D2 锁（四类收窄=畸形件裸崩零行） | m | 积累不修（「EVERY parse path」承诺面的机械锁不完整，发病需双条件） |
+
+| R11-r4-m1 | main→log_attempt 四调用位接线仅 FAILED 位被钉（PENDING/终态位丢 digest·cells 存活；强杀窗口唯一幸存行失输入识别） | m | 积累不修（r2-m1 未穷举兄弟位；C3 锁函数本体） |
+| R11-r4-m2 | 台账派生字段零钉（reasoning_len/usage/elapsed_s——elapsed 无 raw 兜底为唯一时延真源） | m | 积累不修（并入 r3-m1 台账族） |
+
+## R11 收卷（2026-11-15 深夜，r5 终审 0B/0M——电池 20 案终态收卷）
+
+| # | finding | 级 | 处置 |
+|---|---|---|---|
+| r5-m1 | D7 body 键集非穷尽——加 top_p 类 body 键（推理开关族）静默存活，台账不记、契约无声破 | m | 积累不修（一行修=set(body)==四键，随下批授权可顺手闭） |
+| r5-m2 | D7 夹具空白恒等——FIVE_GRID_PROMPT 无首尾空白，strip 漂移零分辨（真实输入件三件均尾带\n） | m | 积累不修（一字修=夹具补尾\n） |
+| r5-m3 | D6 docstring「矩阵满格」实 3/4 格（anthropic×INCOMPLETE=已裁不报格） | m | 积累不修（措辞级） |
