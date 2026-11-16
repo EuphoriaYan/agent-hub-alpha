@@ -30,6 +30,7 @@ type Graph struct {
 	Run        *GraphRun        `json:"run,omitempty"`
 	Verify     *Report          `json:"verify,omitempty"`
 	Live       string           `json:"live,omitempty"` // poll this while something can still change
+	Rev        int64            `json:"rev"`
 	Bus        *GraphBusSummary `json:"bus,omitempty"`
 }
 
@@ -84,6 +85,7 @@ func (s *Service) graph(p *Plan, withVerify bool) (*Graph, error) {
 		}
 	}
 	s.mu.Lock()
+	g.Rev = s.st.Rev
 	if n := len(s.st.Plans[p.ID]); n > p.Version {
 		g.Superseded = n
 	}
@@ -212,20 +214,12 @@ func stripStepTag(out string) string {
 // the planner model never sees what is typed there and has no approval tool.
 // The approval binds the hash the card showed, exactly like the confirm page.
 func (s *Service) serveApprove(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-	w.Header().Set("Access-Control-Allow-Methods", "POST")
 	reply := func(code int, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
 		_ = json.NewEncoder(w).Encode(v)
 	}
-	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-		return
-	case http.MethodPost:
-	default:
+	if r.Method != http.MethodPost {
 		reply(http.StatusMethodNotAllowed, map[string]string{"error": "只接受 POST"})
 		return
 	}
@@ -235,6 +229,7 @@ func (s *Service) serveApprove(w http.ResponseWriter, r *http.Request) {
 		Hash     string `json:"hash"`
 		User     string `json:"user"`
 		Password string `json:"password"`
+		Via      *Via   `json:"via"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
 		reply(http.StatusBadRequest, map[string]string{"error": "请求格式不对"})
@@ -244,7 +239,11 @@ func (s *Service) serveApprove(w http.ResponseWriter, r *http.Request) {
 		reply(http.StatusUnauthorized, map[string]string{"error": "密码不对"})
 		return
 	}
-	run, err := s.Approve(in.Plan, in.Version, in.Hash, in.User)
+	via := in.Via
+	if via == nil {
+		via = &Via{Channel: "mcp-app"}
+	}
+	run, err := s.Approve(in.Plan, in.Version, in.Hash, in.User, via)
 	if err != nil {
 		msg := err.Error()
 		switch {
@@ -264,7 +263,6 @@ func (s *Service) serveApprove(w http.ResponseWriter, r *http.Request) {
 // serveGraph is the read-only projection the MCP App polls from its sandbox,
 // so it answers any origin. It exposes nothing the confirm page does not show.
 func (s *Service) serveGraph(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
 	q := r.URL.Query()
 	var p *Plan

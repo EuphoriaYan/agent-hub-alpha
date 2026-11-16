@@ -18,8 +18,6 @@ services:
       additional_contexts:
         tools: ${DEMO_CACHE}/tools
     environment:
-      CREDIT_PUBLIC_URL: /credit
-      CREDIT_ORIGINS: http://localhost:${CREDIT_SWARM_PORT:-5192},http://127.0.0.1:${CREDIT_SWARM_PORT:-5192}
       CREDIT_ORCHESTRATOR_URL: http://orchestrator:8195
       CREDIT_MEMBER_MCP_URL: http://credit:8091/member-mcp
       CREDIT_MODEL: ${SWARM_MODEL_NAME:-qwen-plus}
@@ -84,8 +82,11 @@ services:
       <<: *model-environment
       FRONTEND_HOST: 0.0.0.0
       CREDIT_MCP_URL: http://credit:8091/mcp
+      CREDIT_INTERNAL_URL: http://credit:8091
     volumes:
       - swarm-home:/root/.jiuwenswarm
+      - ./configure.py:/usr/local/bin/aha-configure.py:ro
+      - ../workbench-plugin:/root/.jiuwenswarm/domain/application_plugins/credit-workbench:ro
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5173/',timeout=5)"]
       interval: 10s

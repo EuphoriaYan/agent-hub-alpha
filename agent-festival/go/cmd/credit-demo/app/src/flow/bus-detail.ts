@@ -1,4 +1,7 @@
-import type { Graph, GraphNode } from "./graph";
+// From the Agent Bus (W05) branch: what a node's RDC binding, Gateway calls,
+// Agent run and saved result say, rendered as escaped HTML. Kept as is so its
+// wording rules (never claim what was not recorded) and tests carry over.
+import type { Graph, GraphNode } from "../types";
 
 export interface CapabilityBinding {
   agent_id: string; version: string; card_digest: string; contract_digest: string;

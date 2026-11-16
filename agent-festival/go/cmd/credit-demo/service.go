@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,7 @@ type Run struct {
 	CaseID      string              `json:"case_id"`
 	Status      string              `json:"status"` // queued running done failed
 	ApprovedBy  string              `json:"approved_by"`
+	ApprovedVia *Via                `json:"approved_via,omitempty"`
 	CreatedAt   string              `json:"created_at"`
 	FinishedAt  string              `json:"finished_at,omitempty"`
 	Token       string              `json:"-"`
@@ -94,6 +96,9 @@ type State struct {
 	Runs     map[string]*Run    `json:"runs"`
 	NextPlan int                `json:"next_plan"`
 	NextRun  int                `json:"next_run"`
+	// Rev counts saved changes. It is persisted, so it only grows, even across
+	// restarts: a front end drops any snapshot older than one it has shown.
+	Rev int64 `json:"rev"`
 }
 
 type Service struct {
@@ -170,6 +175,7 @@ func (s *Service) save() error {
 	if s.storageErr != nil {
 		return s.storageErr
 	}
+	s.st.Rev++
 	for _, r := range s.st.Runs {
 		r.TokenSaved = r.Token
 	}
@@ -275,6 +281,42 @@ func (s *Service) Propose(in ProposeInput) (*Plan, error) {
 	return p, nil
 }
 
+// PlanSummary is one line of the workbench's plan list.
+type PlanSummary struct {
+	Plan       string `json:"plan"`
+	Version    int    `json:"version"`
+	Case       string `json:"case"`
+	Goal       string `json:"goal"`
+	OK         bool   `json:"ok"`
+	ProposedAt string `json:"proposed_at"`
+	Run        string `json:"run,omitempty"`
+	RunStatus  string `json:"run_status,omitempty"`
+}
+
+// RecentPlans lists the latest version of each plan, newest first.
+func (s *Service) RecentPlans(limit int) []PlanSummary {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []PlanSummary{}
+	for _, vs := range s.st.Plans {
+		p := vs[len(vs)-1]
+		row := PlanSummary{Plan: p.ID, Version: p.Version, Case: p.CaseID, Goal: p.Goal, OK: p.Precheck.OK, ProposedAt: p.ProposedAt, Run: p.RunID}
+		if r := s.st.Runs[p.RunID]; r != nil {
+			row.RunStatus = r.Status
+		}
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, _ := strconv.Atoi(strings.TrimPrefix(out[i].Plan, "P"))
+		b, _ := strconv.Atoi(strings.TrimPrefix(out[j].Plan, "P"))
+		return a > b
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
 func (s *Service) Plan(id string, version int) (*Plan, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -290,7 +332,16 @@ func (s *Service) Plan(id string, version int) (*Plan, bool) {
 
 // Approve is only reachable from the signed-in confirm page: the planner
 // has no tool for it. The approved hash must be the one shown.
-func (s *Service) Approve(planID string, version int, hash, user string) (*Run, error) {
+// Via records where an approval came from. The demo checks a demo account's
+// password; the user names a front end passes along are kept for audit only:
+// Declared is what the client said, Authenticated what its gateway verified.
+type Via struct {
+	Channel       string `json:"channel"`
+	Declared      string `json:"declared_user,omitempty"`
+	Authenticated string `json:"authenticated_user,omitempty"`
+}
+
+func (s *Service) Approve(planID string, version int, hash, user string, via *Via) (*Run, error) {
 	p, ok := s.Plan(planID, version)
 	if !ok || p.Version != version {
 		return nil, fmt.Errorf("unknown plan version")
@@ -314,7 +365,7 @@ func (s *Service) Approve(planID string, version int, hash, user string) (*Run, 
 	}
 	s.st.NextRun++
 	r := &Run{ID: fmt.Sprintf("R%d", s.st.NextRun), PlanID: p.ID, PlanVersion: p.Version, PlanHash: p.Hash, CaseID: p.CaseID,
-		Status: "queued", ApprovedBy: user, CreatedAt: now(), Steps: map[string]*StepRec{}, Scenario: os.Getenv("CREDIT_BANK_SCENARIO")}
+		Status: "queued", ApprovedBy: user, ApprovedVia: via, CreatedAt: now(), Steps: map[string]*StepRec{}, Scenario: os.Getenv("CREDIT_BANK_SCENARIO")}
 	for _, l := range p.Layers {
 		for _, id := range l {
 			a := p.agent(id)
@@ -608,7 +659,7 @@ func (s *Service) Done(runID, token string, skipped []string, final string, fail
 func (s *Service) judgePrompt() string {
 	var b strings.Builder
 	q, _ := s.spec["question"].(map[string]any)
-	fmt.Fprintf(&b, "你是风险判断员（S1）。只按已发布的判断规约 %v@%v 作判断，不得自行补充规则。\n\n规则（precedence 越小越优先）：\n", q["question_id"], q["spec_version"])
+	fmt.Fprintf(&b, "你是风险判断员。只按已发布的判断规约 %v@%v 作判断，不得自行补充规则。\n\n规则（precedence 越小越优先）：\n", q["question_id"], q["spec_version"])
 	if rules, ok := s.spec["rules"].([]any); ok {
 		for _, r := range rules {
 			if m, ok := r.(map[string]any); ok {
@@ -657,7 +708,7 @@ func liveGrants() []ledger.Grant {
 	return out
 }
 
-// Judgment validates the S1 output against the published spec and adopts it
+// Judgment validates the risk judgment against the published spec and adopts it
 // through the festival adoption machine. Returns the normalized step output.
 func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	s.mu.Lock()
@@ -708,7 +759,7 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 		AdoptionVersion: "0.1.0",
 		Identity:        ledger.Identity{BusinessRequestID: "br-" + strings.ToLower(r.CaseID) + "-" + strings.ToLower(r.ID), EvaluationRevision: "er-1", OperationID: op},
 		Versions: ledger.Versions{Evidence: sha(evidence...), Rule: fmt.Sprintf("%v@%v", q["question_id"], q["spec_version"]),
-			Model: s.cfg.Model, Readout: "s1-readout-1", Policy: r.PlanHash},
+			Model: s.cfg.Model, Readout: "risk-readout-1", Policy: r.PlanHash},
 		PayloadDigest:    digest,
 		GrantsAtDecision: grants,
 		Accountability:   &ledger.Accountability{Session: r.ID, Skill: "risk-judge", Role: "customer-manager"},

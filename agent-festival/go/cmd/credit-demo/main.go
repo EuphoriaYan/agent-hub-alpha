@@ -19,7 +19,7 @@ func main() {
 		Addr:             envOr("CREDIT_ADDR", ":8091"),
 		DataDir:          envOr("CREDIT_DATA", "/data"),
 		OrchestratorURL:  envOr("CREDIT_ORCHESTRATOR_URL", "http://orchestrator:8195"),
-		PublicURL:        strings.TrimRight(envOr("CREDIT_PUBLIC_URL", "/credit"), "/"),
+		PublicURL:        strings.TrimRight(envOr("CREDIT_PUBLIC_URL", ""), "/"),
 		Origins:          strings.Split(envOr("CREDIT_ORIGINS", "http://localhost:15192"), ","),
 		MemberMCPURL:     envOr("CREDIT_MEMBER_MCP_URL", "http://credit:8091/member-mcp"),
 		Model:            envOr("CREDIT_MODEL", "qwen-plus"),

@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-const bundle = await build({ entryPoints: ['src/bus-detail.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
+const bundle = await build({ entryPoints: ['src/flow/bus-detail.ts'], bundle: true, write: false, format: 'esm', platform: 'node' });
 const { executionDetailHTML: detail, busOverviewHTML: overview, associationText, exchangeDescription } = await import('data:text/javascript;base64,' + Buffer.from(bundle.outputFiles[0].text).toString('base64'));
 const node = { id: 'intake', name: '资料核验', task: '核对资料', kind: 'investigate', execution: { kind: 'agent_bus', path_mode: 'DIRECT', binding: { agent_id: 'credit-material', version: '1.0.1', card_digest: 'card', contract_digest: 'contract' } } };
 test('planned binding does not claim a dispatch or an executing instance', () => {

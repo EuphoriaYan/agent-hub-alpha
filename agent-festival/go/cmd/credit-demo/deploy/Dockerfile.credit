@@ -15,8 +15,7 @@ WORKDIR /src
 COPY go/go.mod go/go.sum ./go/
 COPY go/internal ./go/internal
 COPY go/cmd/credit-demo ./go/cmd/credit-demo
-COPY --from=card /src/app/dist/graph-app.html ./go/cmd/credit-demo/app/dist/graph-app.html
-COPY --from=card /src/web/graph.js ./go/cmd/credit-demo/web/graph.js
+COPY --from=card /src/web/graph-flow.js ./go/cmd/credit-demo/web/graph-flow.js
 COPY schema ./schema
 WORKDIR /src/go/cmd/credit-demo
 RUN --mount=type=cache,id=issue16-gomod,target=/root/go/pkg/mod \
