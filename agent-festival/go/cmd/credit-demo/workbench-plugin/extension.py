@@ -116,10 +116,23 @@ class CreditWorkbench(ApplicationPluginExtension):
             }
             await upstream(ws, req_id, lambda: _call(self._base, "POST", "/api/approve", body))
 
+        async def resume(ws, req_id, params, session_id):  # noqa: ANN001
+            del session_id
+            params = params if isinstance(params, dict) else {}
+            run, password = params.get("run"), params.get("password")
+            if not (isinstance(run, str) and _RUN.fullmatch(run) and isinstance(password, str)):
+                await channel.send_response(ws, req_id, ok=False, error="需要 run 和密码", code="BAD_REQUEST")
+                return
+            # The Go service checks the demo credential and waiting state. Never
+            # infer authorization from the WebSocket's declared user or retry here.
+            body = {"run": run, "user": "alice", "password": password}
+            await upstream(ws, req_id, lambda: _call(self._base, "POST", "/api/resume", body))
+
         # local_only: handled by the Gateway itself, not forwarded to the agent server.
         channel.register_method("plugin.credit_workbench.plans", plans, local_only=True)
         channel.register_method("plugin.credit_workbench.graph", graph, local_only=True)
         channel.register_method("plugin.credit_workbench.approve", approve, local_only=True)
+        channel.register_method("plugin.credit_workbench.resume", resume, local_only=True)
 
 
 async def register_extensions(registry: Any) -> list[CreditWorkbench]:

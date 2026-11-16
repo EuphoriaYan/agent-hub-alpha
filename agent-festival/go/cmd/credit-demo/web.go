@@ -131,6 +131,7 @@ func (s *Service) routes(mux *http.ServeMux) {
 	s.busRoutes(mux)
 	mux.HandleFunc("/api/graph", s.serveGraph)
 	mux.HandleFunc("/api/approve", s.serveApprove)
+	mux.HandleFunc("/api/resume", s.serveResume)
 	// The workbench plugin lists plans to pick from; read-only like /api/graph.
 	mux.HandleFunc("/api/plans", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

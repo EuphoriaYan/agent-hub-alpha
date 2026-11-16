@@ -20,6 +20,7 @@ const POLL_MS = 1200, LIST_MS = 5000;
 function statusOf(p: PlanRow): [string, string] {
   if (p.run_status === "done") return ["ok", "已完成"];
   if (p.run_status === "failed") return ["bad", "执行失败"];
+  if (p.run_status === "waiting") return ["wait", "等待核对"];
   if (p.run_status) return ["run", "执行中"];
   if (!p.ok) return ["bad", "预检未通过"];
   return ["wait", "待批准"];
@@ -33,6 +34,35 @@ const savedPick = (): Pick | undefined => {
   try { m = /^(P\d+)\/(\d+)$/.exec(localStorage.getItem(PICK_KEY) ?? ""); } catch { /* storage blocked */ }
   return m ? { plan: m[1], v: Number(m[2]) } : undefined;
 };
+
+// A human command through the existing plugin channel. Never auto-retry a
+// timeout: the original run is polled to reconcile whether it was accepted.
+function ResumeControl({ run, onAccepted }: { run: string; onAccepted: () => void }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const pending = useRef(false);
+  return <form className="wb-resume" onSubmit={async (e) => {
+    e.preventDefault();
+    if (pending.current) return;
+    pending.current = true; setBusy(true); setMessage("");
+    try {
+      await gw.call("plugin.credit_workbench.resume", { run, password });
+      setMessage("恢复请求已接受，正在核对原任务；这不表示任务已完成。");
+      onAccepted();
+    } catch (error) {
+      setMessage(`${(error as Error).message}。请先查看原任务最新状态，勿连续重试。`);
+    } finally {
+      setPassword(""); pending.current = false; setBusy(false);
+    }
+  }}>
+    <span>{run} 正在等待核对。使用演示账号 alice 恢复原任务。</span>
+    <label>演示密码 <input type="password" value={password} autoComplete="off" disabled={busy}
+      onChange={(e) => setPassword(e.target.value)} /></label>
+    <button type="submit" disabled={busy || !password}>{busy ? "提交中…" : "核对原任务并继续"}</button>
+    {message && <span role="status">{message}</span>}
+  </form>;
+}
 
 function App() {
   const [plans, setPlans] = useState<PlanRow[]>();
@@ -131,6 +161,7 @@ function App() {
       </aside>
       <main className="wb-main">
         {err && <div className="wb-err">{err}</div>}
+        {g?.run?.status === "waiting" && <ResumeControl key={g.run.id} run={g.run.id} onAccepted={() => setNonce((n) => n + 1)} />}
         {g ? (
           <ReactFlowProvider key={`${g.plan}/${g.version}`}><CreditGraph g={g} opts={opts} /></ReactFlowProvider>
         ) : (
