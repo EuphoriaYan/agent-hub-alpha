@@ -428,6 +428,7 @@ type Job struct {
 	MemberMCPURL  string                    `json:"member_mcp_url"`
 	LeaseSeconds  int                       `json:"lease_seconds"`
 	GraphRevision string                    `json:"graph_revision"`
+	Model         string                    `json:"model"` // the run's bound model; the executor must run exactly this
 }
 
 func newToken() string {
@@ -438,7 +439,16 @@ func newToken() string {
 
 // Lease hands one runnable run to an executor. A run whose lease expired is
 // taken over with a new token; the old executor's writes are then fenced.
+// Lease is LeaseAs for an in-process executor configured like the service.
 func (s *Service) Lease(worker string) (*Job, error) {
+	return s.LeaseAs(worker, s.cfg.Model)
+}
+
+// LeaseAs hands a run only to an executor whose actual model is the run's
+// bound model (AR-04 M1). An executor on another model, or one that does not
+// report its model, gets nothing: the run stops as blocked with the reason
+// before any member runs, and is never continued on the other model.
+func (s *Service) LeaseAs(worker, executorModel string) (*Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.storageErr != nil {
@@ -470,11 +480,18 @@ func (s *Service) Lease(worker string) (*Job, error) {
 				continue
 			}
 		}
+		if bound := s.runModel(r); executorModel != bound {
+			s.blockRun(r, modelMismatch(bound, "执行器 "+worker, executorModel))
+			if err := s.save(); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		r.Epoch++
 		r.Token = newToken()
 		r.LeaseUntil = time.Now().Add(time.Duration(s.cfg.LeaseSeconds) * time.Second)
 		r.Status = "running"
-		r.Leases = append(r.Leases, fmt.Sprintf("%s 第 %d 次领取（%s）", now(), r.Epoch, worker))
+		r.Leases = append(r.Leases, fmt.Sprintf("%s 第 %d 次领取（%s，模型 %s）", now(), r.Epoch, worker, executorModel))
 		for _, st := range r.Steps {
 			if st.Status == "running" {
 				st.Status = "pending"
@@ -510,9 +527,27 @@ func (s *Service) Lease(worker string) (*Job, error) {
 		}
 		return &Job{RunID: r.ID, Token: r.Token, Epoch: r.Epoch, Mode: "graph", Team: p.Team, SpecDigest: p.SpecDigest,
 			UserInput: fmt.Sprintf("案件号：%s。任务：%s", r.CaseID, p.Goal),
-			Members:   members, MemberMCPURL: s.cfg.MemberMCPURL, LeaseSeconds: s.cfg.LeaseSeconds, GraphRevision: p.Key()}, nil
+			Members:   members, MemberMCPURL: s.cfg.MemberMCPURL, LeaseSeconds: s.cfg.LeaseSeconds, GraphRevision: p.Key(),
+			Model: executorModel}, nil
 	}
 	return nil, nil
+}
+
+// errModelBinding: an executor is about to run a model other than the run's
+// bound model. Mapped to HTTP 409 with this code; the call is not made.
+var errModelBinding = errors.New("MODEL_BINDING_MISMATCH")
+
+func modelMismatch(bound, who, actual string) string {
+	if actual == "" {
+		actual = "（未上报）"
+	}
+	return fmt.Sprintf("执行端模型与任务绑定不一致，已在调用模型前停止：任务绑定 %s，%s 上报 %s。不会改用其他模型继续，需人工处理。", bound, who, actual)
+}
+
+// blockRun stops a run for an operator decision and withdraws the current
+// executor's lease, so it can write nothing further. Must hold s.mu.
+func (s *Service) blockRun(r *Run, reason string) {
+	r.Status, r.Final, r.Token = "blocked", reason, ""
 }
 
 var errFenced = fmt.Errorf("fenced: this executor's lease was taken over")

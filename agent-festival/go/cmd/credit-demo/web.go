@@ -269,13 +269,14 @@ func (s *Service) routes(mux *http.ServeMux) {
 		Skipped []string `json:"skipped"`
 		Final   string   `json:"final"`
 		Failed  string   `json:"failed"`
+		Model   string   `json:"model"` // the executor's actual model (AR-04 M1)
 	}
 	mux.HandleFunc("/exec/lease", func(w http.ResponseWriter, r *http.Request) {
 		var c call
 		_ = jsonIn(r, &c)
 		deadline := time.Now().Add(20 * time.Second)
 		for {
-			job, err := s.Lease(c.Worker)
+			job, err := s.LeaseAs(c.Worker, c.Model)
 			if err != nil {
 				errOut(w, err)
 				return
