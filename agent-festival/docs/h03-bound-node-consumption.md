@@ -39,4 +39,17 @@ W01 已有 verified 答案候选；独立性签收、真实年报专业角色和
 
 固定 localhost CLI 本轮仍为 BLOCKED：Docker internal 网络虽声明回环绑定，容器实际 `NetworkSettings.Ports["8091/tcp"]` 为 null。成功结果使用已批准的可信本机操作员 API：先调用原 `deployed(project, root, receipts)` 完成 source/config/container 审计，再只从返回的 owned credit 容器取其唯一内部网络 IP，核 owner/project/service/image 与 IPAM 子网，仅设置该原 `Client` 实例的 `base`；随后调用原 initialize/login/propose/approve、wait_state/formal_receipt/graph_receipt、unknown_check 和 compare 函数。可复核前置与逐步入口见[部署工具的实际交接](../go/cmd/credit-demo/deploy/h03/README.md#本轮实际交接2026-11-17)。这不是 CLI 或原 WorkSwarm 浏览器通过，也不引入 proxy、新 runner、远端地址入口或门禁豁免；不能访问已审计 owned bridge IP 时仍 BLOCKED。
 
-本轮原 Go Run 页引用及 Graph committed 投影已有实际证据；原 WorkSwarm 宿主/真实任务后台的浏览器观察仍 BLOCKED。独立外部 egress、实际角色模型/银行请求计数及有效租约内重复 Commit/持久化失败窗口仍 BLOCKED/NOT_RUN。完成后 Commit409 只证明关闭租约 fence；框架 model_events=0 不能代替外发观测。合成工程主链通过不等同年报 Gold、业务 D2、生产 IAM、发布或合入批准。
+上述早期工程记录中的原 Go Run/Graph 投影已验证，而当时的 WorkSwarm、外发观察及有效租约故障窗口仍缺证；原记录保留。下述增量补验使用另具名运行和新原件，不把完成后 Commit409、框架 model_events=0 或新证据追认为旧窗口通过。合成工程主链仍不等同年报 Gold、业务 D2、生产 IAM、发布或合入批准。
+
+
+## Ready 增量补验（2026-11-17）
+
+原运行链新增了有效租约内的重复 Commit200 复用、合同合法但结果不同的409冲突、真实文件系统 rename 保存失败503与后续执行冻结，以及同容器修复重启后 UNKNOWN 身份/发送次数保留。保存失败个案限于原 Begin-reuse 保存；不泛称已对 Commit/Done 的每个持久化阶段注入故障。慢 RDC 个案由独立观察确认原发现请求已进入阻塞，随后三次原 Heartbeat200 均在释放前完成；同 Run 最终仍按原两节点正式提交。
+
+原七服务另有精确端点观察：连接、显式数据报、初末 socket peer 与 DNS 分开核对；同 IP 的允许/不允许端口有独立正负自检。新窗口中原两节点各发送一次并完成100/5，旧 UNKNOWN 不重派。只签已捕获服务、生命周期及协议前缀范围；不从无密钥、空日志或框架计数推出任意协议/未来的零调用。早期 IP-only 端口证据缺项与原 NO-GO 保留，不能用新字段补造旧记录。时长采用原单调时钟；不把曾出现差异的墙钟标签当作一致时长。
+
+原 WorkSwarm 已按固定源码 `1142e5fb3984a2b1bc6352669a464976e204b2dc` 独立安装、构建原前端并运行原 CLI，加载本批四文件插件。4319 个 runtime/前端/manifest Git blob 及265个实装包与原锁核对一致；安装工具 uv0.11.7 与锁内运行依赖 uv0.12.5 分列。真实宿主的「编排台」通过原 WebSocket RPC 读取原 R1/R2：选用依据、字段/材料/上游摘要和 committed/UNKNOWN 投影匹配原 Go Graph，刷新保留原任务关联，前后原发送及查询记录不变。R2 的未知节点本来没有远端 Task 回执，页面保持空缺，不补造 Task。首次模型指引的“跳过”会写宿主设置，不是业务派发；未触发 chat、approve 或 resume。
+
+本机不调用模型的配置须显式使用原支持的 `JIUWENSWARM_CONFIG_URL=off`。仅清空 models.defaults 或关闭 updater 不足以避免远程配置拉取：早期窗口实际观察到外连/opaque TLS，后续 DNS 与原依赖 `agent_gateway/auth/remote_config.py` 的 GET `/v1/config` 调用点对应，但没有解密旧 TLS。新 off 配置另做启动→真实页面→停止的独立生命周期观察，未观察到非许可 inet 端点/显式数据报、DNS query 或 TLS 写；有界结论不追认旧窗，也不承诺任意语义全称零。
+
+该实测是 WSL/Linux 原 CLI 宿主路径，不是九服务 `--ui original` Docker 或 Windows 原生资格。原 CLI stop 曾失败；仅终止本次核验过的独占启动器，由原 supervision 收尾，确认自有进程组/cgroup及端口清空。原七服务另经原 owned stop 停止并保留卷及 UNKNOWN 历史。原宿主/依赖源码、原模型/银行权限、SDK/Base/Bus/公共协议和依赖锁未因此修改。具体配置步骤见[原宿主配方](../go/cmd/credit-demo/deploy/h03/README.md#原-workswarm-cli-宿主增量配方)。正式 Hub 接收、共享部署、真实业务/D2、H04/H05 和发布资格仍分别验收。

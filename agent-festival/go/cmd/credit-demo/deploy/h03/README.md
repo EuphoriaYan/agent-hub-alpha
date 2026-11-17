@@ -135,4 +135,49 @@ Bus 运行依赖另绑定本轮 T405 的原 source closure `27bb09f7dfae5057b257
 
 以上 API 步骤需要本机能直接访问已审计的 owned bridge IP；不具备该前置就 BLOCKED，不改共享网络或退回未审计地址。安全交接证据包含两组正式回执、比较、UNKNOWN restart、派生材料和镜像来源冻结；秘密只留原私有部署目录。
 
-工程主链通过后仍有明确缺项：原 WorkSwarm 宿主/插件/真实任务后台的浏览器验收、独立外部 egress/模型/银行计数、有效租约内 Commit 幂等及持久化故障窗口仍 BLOCKED/NOT_RUN。完成后 Commit 的 409 只证明原关闭租约 fence；框架 model_events=0 不证明外发为零。本轮合成材料结果不构成年报 Gold、业务 D2、生产 IAM 或发布准入。详见[整体消费交接](../../../../../docs/h03-bound-node-consumption.md)。
+上述早期工程记录保留原 WorkSwarm、独立外发观察及有效租约故障窗口的缺证。后续增量补验另记如下；完成后 Commit409 与框架 model_events=0 均不代替这些新证据。合成材料不构成年报 Gold、业务 D2、生产 IAM 或发布准入。详见[整体消费交接](../../../../../docs/h03-bound-node-consumption.md)。
+
+
+## 原 WorkSwarm CLI 宿主增量配方
+
+本轮已实际验证原宿主、原插件和原任务后台；使用原 CLI 的 WSL/Linux 本机路径。九服务 Docker `--ui original`、Windows 原生以及生产 IAM 不由此获得资格。原 H03 固定 localhost CLI 的网络限制也没有被改写成通过；插件只连接经 `deployed` 审计的 owned Hub。
+
+### 固定来源与安装
+
+- 原宿主源码：`openJiuwen-ai/jiuwenswarm@1142e5fb3984a2b1bc6352669a464976e204b2dc`。保留原 runtime、前端、manifest 与原打包钩子 `scripts/build_config.py`，不能拿旧工作副本或缺文件的稀疏下载代替。
+- 本轮 CPython3.12.3、安装工具 uv0.11.7；265个实装包（包括原宿主）与原 uv.lock 匹配、pip check 通过，6个 Git 依赖提交匹配。运行依赖中的 uv0.12.5 是原锁内容，不冒称它也是安装工具版本。
+- 原前端按原 package-lock 执行 `npm ci --ignore-scripts`、`npm run build`，包括原 prebuild/tsc/Vite；不得换空 dist。打包阶段不要携带自行建立的 node_modules 依赖链接，本轮仅移除自己的链接，未删除其目标依赖。
+- venv/cache 使用 Linux 原生独占目录，源码与本地证据另存；本轮 NTFS 大量文件落盘较慢的阶段和传输/打包失败均保留，未计为另一份成功。
+
+安装时固定 `UV_PROJECT_ENVIRONMENT`、`UV_CACHE_DIR` 与 `UV_PYTHON_DOWNLOADS=never`，从固定原源码目录调用原 uv0.11.7：
+
+```bash
+"$UV_BIN" sync --frozen --no-dev --no-editable --link-mode hardlink
+"$UV_BIN" pip check --python "$UV_PROJECT_ENVIRONMENT/bin/python"
+```
+
+`UV_BIN` 和各目录须为操作者已核验的本地绝对路径；这两个命令不重新解析或升级原锁。不要复制用户既有 workspace、API key、SWARM_* 或模型/银行配置。
+
+### 独占原配置与插件
+
+1. 给原 CLI 一个新独占 HOME，原 `jiuwenswarm-init` 不加 `--force`。原默认根是该 HOME 下的 `.jiuwenswarm`；以原 `get_config_dir`、`get_domain_data_dir` 和 Gateway `get_root_dir` 实际返回值核对，再写配置。仅设置 DATA_DIR 而与默认 HOME 分离可能回退包内配置，本轮首个尝试因此被本地断言拒绝，不能继续向包内或共享目录写入。
+2. 模型默认列表为空，不提供真实 key；原配置 updater.enabled=false。**另须在原进程启动前设置 `JIUWENSWARM_CONFIG_URL=off`**，使用已锁依赖原支持的关闭方式，避免默认远程登录/赠送模型活动配置预热。该设置只作用于此本机参考环境，不改变原 Hub 登录或任务权限，也不宣称生产 IAM。
+3. 使用原已支持的无前缀 `GATEWAY_PORT`、`AGENT_SERVER_PORT`、`WEB_PORT`、`FRONTEND_PORT` 设置独占端口。本轮分别为19401、19402、19403、19404，frontend host绑定127.0.0.1。不要以不被原入口识别的变量替代这些变量，也不要占用他人默认端口。
+4. 将 `workbench-plugin` 的 `extension.py`、`extension.yaml`、`frontend/dist/index.html`、`frontend/dist/app.js` 按实际 SHA 安装到原 domain 下的 application_plugins/credit-workbench；由原 ExtensionManager 加载。实际 domain 路径必须由原 helper 核对，不猜目录。
+5. 原 `CREDIT_INTERNAL_URL` / `CREDIT_MCP_URL` 只能指向本次严格核验来源、所有者、镜像、唯一内部网络及地址的原 Hub，不能由浏览器注册任意后端。使用原 `jiuwenswarm-start all`，不运行要求 SWARM_* 模型变量的演示 aha-configure 包装。
+
+这是一份经原 CLI 实跑的本机配方，不是新增部署/调度系统。没有变更宿主、SDK、公共协议、数据库或原锁源码。
+
+### 实际验收和观察边界
+
+独立操作者实际打开原 WorkSwarm→「编排台」→原插件 iframe，使用真实原 WebSocket plans/graph：R1 正式两节点结果、选用分母/理由、字段/材料/上游摘要匹配原 Go Graph；R2 waiting/UNKNOWN 及缺失远端 Task 回执保持原样。刷新后仍选同一原任务；前后原身份、SendMessage/GetTask记录不变。实际 served index/app.js 字节 SHA 与原插件/本次安装收据相等。没有通过模拟 RPC、假任务、聊天、批准或 Resume 生成成绩。“跳过首次模型指引”只写宿主设置，不能把任务/业务只读扩大成整个宿主绝无设置写入。
+
+观察使用启动前建立的独占 cgroup及只过滤本组的私有 syscall observer，先附加后启动原 init/CLI 子进程，持续覆盖页面读取，子进程收尾后关闭。精确端点、显式数据报、DNS、TLS、向量不完整与map损失分别记录；不改变共享 tracing/防火墙。最终 off 配置窗口相应非许可计数及损失为0，只对这个已观测生命周期/协议范围签收，不是任意语义全称零或未来保证。没有记录旧monotonic起点时不补造时长；墙钟标签与生命周期顺序分开。
+
+早期默认配置和仅关闭 updater 的窗口确有外连/opaque TLS。定向 DNS 为 aigw.openjiuwen.com，原依赖 remote_config.py 定义 GET https://aigw.openjiuwen.com/v1/config；旧 TLS 内容并未解密，不追认为零调用，也不归因为已经被否定的 updater 假设。新 off 配置是独立具名运行；旧失败与原 NO-GO 不覆盖、不改写。
+
+### 收尾
+
+原 CLI stop 在本轮报告失败，不能写成该命令通过。随后只向本次已核对的独占原启动器 PID 发送 SIGTERM，由原 supervision 收尾；确认自有 cgroup为空、私有观察FD关闭、四端口不可连接，再移除空cgroup，保留 workspace/凭据所在本地目录供有权复核。不要批量终止同名进程、删除共享目录或删除原 Task/UNKNOWN 以恢复首发资格。原七服务另走原 `launch_h03.py stop`，保留数据卷与未知历史。
+
+本轮有限工程补验可供代码评审；真实业务 Gold/D2、专业年报角色、生产身份、共享部署、H04/H05 及发布仍分别验收。
