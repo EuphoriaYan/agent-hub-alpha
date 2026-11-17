@@ -11,28 +11,34 @@ const builderBuildBody = `<section id="builder-build"><h2>构建场景 Agent</h2
 </section><script>(()=>{
 const base='{{.Base}}/api/builder-actions/', select=document.getElementById('build-alias');
 const status=document.getElementById('build-status'), detail=document.getElementById('build-detail'), history=document.getElementById('build-history');
-const submit=document.getElementById('build-submit'); let original=new Map(), permissionLost=false;
+const submit=document.getElementById('build-submit'), refreshButton=document.getElementById('build-refresh');
+const permissionMessage='当前没有查看或构建权限；权限恢复后请重新加载页面。';
+let original=new Map(), permissionLost=false, generation=0;
+function deny(){permissionLost=true;generation++;original.clear();detail.textContent='';history.replaceChildren();select.replaceChildren();select.disabled=true;submit.disabled=true;refreshButton.disabled=true;status.textContent=permissionMessage;}
+function current(value){if(permissionLost||value!==generation)throw new Error(permissionMessage);}
+function failed(error){status.textContent=permissionLost?permissionMessage:error.message;}
 async function call(path,body){
+ const active=generation;current(active);
  const r=await fetch(base+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
- if(r.status===403){permissionLost=true;detail.textContent='';history.replaceChildren();submit.disabled=true;throw new Error('当前没有查看或构建权限');}
- if(!r.ok)throw new Error('暂时无法核对原任务，请稍后查看');return r.json();
+ if(r.status===403){deny();throw new Error(permissionMessage);}
+ current(active);if(!r.ok)throw new Error('暂时无法核对原任务，请稍后查看');const value=await r.json();current(active);return value;
 }
 async function show(id){
- const current=await call('commands/'+encodeURIComponent(id));
- detail.textContent=JSON.stringify(current,null,2);
- if(current.operation){const states={running:'正在构建',waiting:'等待补充信息',failed:'构建失败',cancelled:'已取消',stopped:'已停止',completed:'构建任务已完成',unknown:'执行情况待核对'};
-  status.textContent=(states[current.operation.status]||'执行情况待核对')+(current.evidence?.status==='verified'?'；已有独立工程验收证据':'；独立验收尚未确认')+'。资源清理：'+({complete:'已确认',failed:'失败',pending:'进行中',not_run:'未运行',unknown:'待核对'}[current.operation.cleanup]||'待核对');
+ const active=generation, value=await call('commands/'+encodeURIComponent(id));current(active);
+ detail.textContent=JSON.stringify(value,null,2);
+ if(value.operation){const states={running:'正在构建',waiting:'等待补充信息',failed:'构建失败',cancelled:'已取消',stopped:'已停止',completed:'构建任务已完成',unknown:'执行情况待核对'};
+  status.textContent=(states[value.operation.status]||'执行情况待核对')+(value.evidence?.status==='verified'?'；已有独立工程验收证据':'；独立验收尚未确认')+'。资源清理：'+({complete:'已确认',failed:'失败',pending:'进行中',not_run:'未运行',unknown:'待核对'}[value.operation.cleanup]||'待核对');
  }else status.textContent='已保存原任务关联，执行情况待核对；查看会继续核对同一个任务。';
 }
 async function refresh(){
- const current=await call('builds');permissionLost=false;original=new Map(current.intents.map(x=>[x.alias,x.command_id]));
- const selected=select.value;select.replaceChildren();for(const alias of current.aliases){const option=document.createElement('option');option.value=alias;option.textContent=alias;select.append(option);}if(current.aliases.includes(selected))select.value=selected;
- history.replaceChildren();for(const row of current.intents){const li=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=row.alias+' · 查看原任务';button.onclick=()=>show(row.command_id).catch(e=>status.textContent=e.message);li.append(button);history.append(li);}
+ const active=generation, value=await call('builds');current(active);original=new Map(value.intents.map(x=>[x.alias,x.command_id]));
+ const selected=select.value;select.replaceChildren();for(const alias of value.aliases){const option=document.createElement('option');option.value=alias;option.textContent=alias;select.append(option);}if(value.aliases.includes(selected))select.value=selected;
+ history.replaceChildren();for(const row of value.intents){const li=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=row.alias+' · 查看原任务';button.onclick=()=>show(row.command_id).catch(failed);li.append(button);history.append(li);}
  submit.disabled=!select.value;submit.textContent=original.has(select.value)?'核对原构建':'提交构建';
  if(original.has(select.value))await show(original.get(select.value));else status.textContent=select.value?'可以提交这个已登记的参考任务':'当前没有可用的参考任务';
 }
-select.onchange=()=>{submit.textContent=original.has(select.value)?'核对原构建':'提交构建';};
-submit.onclick=async()=>{submit.disabled=true;try{await call('build',{alias:select.value});await refresh();}catch(e){status.textContent=e.message;try{await refresh();}catch(recovery){status.textContent=recovery.message;}}finally{submit.disabled=permissionLost||!select.value;}};
-document.getElementById('build-refresh').onclick=()=>refresh().catch(e=>status.textContent=e.message);
-refresh().catch(e=>status.textContent=e.message);
+select.onchange=()=>{if(permissionLost)return;submit.textContent=original.has(select.value)?'核对原构建':'提交构建';};
+submit.onclick=async()=>{if(permissionLost)return;submit.disabled=true;try{await call('build',{alias:select.value});await refresh();}catch(e){failed(e);if(!permissionLost){try{await refresh();}catch(recovery){failed(recovery);}}}finally{submit.disabled=permissionLost||!select.value;}};
+refreshButton.onclick=()=>refresh().catch(failed);
+refresh().catch(failed);
 })();</script>`
