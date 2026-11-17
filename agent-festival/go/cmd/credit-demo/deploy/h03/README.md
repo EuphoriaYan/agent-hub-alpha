@@ -76,7 +76,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p test_run_java_pro
 python3 verify_h03.py --project h03-engineering --scenario engineering-two-role --output-dir <H>/.specify/feature/HUB-NEXT/evidence/native/prepared
 ```
 
-只有在源码冻结、已有镜像来源与独占部署经统一协调后，显式 `--run` 才连接 T312 已启动的原链。驱动只读取本地固定回环端口，拒绝代理/远端 Docker 覆盖，重核每个容器的所有者、镜像、运行状态、实际环境与内部网络。它不启动服务，不调用 stepPut，不生成执行结果，不创建另一调度器。
+只有在源码冻结、已有镜像来源与独占部署经统一协调后，显式 `--run` 才连接 T312 已启动的原链。CLI 使用本地固定回环端口，拒绝代理/远端 Docker 覆盖，重核每个容器的所有者、镜像、运行状态、实际环境与内部网络。它不启动服务，不调用 stepPut，不生成执行结果，不创建另一调度器。本轮该固定端口未兑现，CLI 原生结果为 BLOCKED；下述已验证操作员 API 路径须单独记录。
 
 ```bash
 python3 verify_h03.py --run --project h03-owned-run --deployment-root <existing-T312-owned-root> --image-receipts <fixed-native-image-receipts.json> --output-dir <H>/.specify/feature/HUB-NEXT/evidence/native/baseline
@@ -105,3 +105,34 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s . -p test_verify_h03.p
 ```
 
 这些自测均用合成状态与 mock 传输验证驱动边界，不是原生运行证据。
+
+## 本轮实际交接（2026-11-17）
+
+本轮已实际走通原 MCP 选择/提案→原登录与确认页批准→原 Java Worker/Runtime/Bus→两个独立角色→正式 Step 提交。独占 baseline09 的 P1/R1 得到 total=100、difference=5；独占 changed10 的 P1/R1 得到 101、6。两组各自有两个不同 Task/context，每个角色各一次 SendMessage；正式输入、上游产物引用、原 InputDigest/ArtifactDigest 和原 Go Graph 的 committed 投影均通过校对，离线比较确认材料变化传播到采纳/输入/产物摘要。
+
+baseline09 另一次明确故障负例 R2 在原 SendMessage 超时后进入 UNKNOWN。原租约清空后，实际重启同一 owned credit 容器、保留数据卷、重建 MCP/登录会话，再 Resume 同一 R2；原 Call 身份与摘要保持、仍 UNKNOWN、发送数保持 1。基线已完成 R1 在 QA reader 修复后仅只读复验，未重新派发补成绩。两个项目最后均经原 owned stop 停止，保留数据卷、原 Run/Task/UNKNOWN 和早期失败证据。
+
+| 本轮消费来源 | 固定版本或摘要 | 解释 |
+| --- | --- | --- |
+| Go 运行源码 | `e09f71e3d9973fb44fd15fa54ca7bc95ff5e992c` | Linux binary SHA256 `032bfa1d14a609d4b6c576db0e0f48c71727a906a0ca8e445fee988dd2188b72` |
+| credit 运行镜像 | `sha256:3b2d2056ee0d3d0910c5a84d5df4a8acbe5f0b1ec8b6014b0224521d3fd5e096` | 固定原 runtime base 上刷新已验证 binary，未宣称完整重跑原 Dockerfile |
+| QA reader 源码 | `9f6365a2311d8d167e5d62517ec028c17365bfe0` | 持久 StepRec 使用原 `remote_call` tag；HTTP Begin 的 `call` 不变。修复后 16 个 stdlib 测试通过，不替换已运行 Go/Java 字节 |
+| Java 装配来源 | `fe14af28d51296a48ecea4bdfe791054f1b4c670` | 九个模块源码文件复核未变；orchestrator JAR SHA256 `0b947bced7f698fc1266436a5ba876f70e7d3ea7e4fd846c5ee37cef3dc1c9ed`，professional JAR SHA256 `177c51d33499d9e9fd40a42a4dcf9202645b748ea5aee0e1532a0c36e3787a89`。沿用其实际离线 Maven/probe 回执，镜像刷新未重跑全 Maven |
+
+Bus 运行依赖另绑定本轮 T405 的原 source closure `27bb09f7dfae5057b2573a4c021ce47ce37f25309ef01eacda048b21c61090bd` 与实际 build/test 收据，不能把可变 tag 或历史测试当作本轮来源。交接记录分别封存 SourceImage/binary/JAR 的前后 SHA、原 base image ID、输出 image ID 和材料派生摘要；后续仅文档提交不会改变这些已验证运行来源。
+
+### 可信本机操作员 API 前置与步骤
+
+本轮 Docker internal 网络的 credit 容器虽声明回环 PortBindings，实际 `NetworkSettings.Ports["8091/tcp"]` 为 null，固定 `127.0.0.1:18191` 不可用。成功的工程结果来自已批准的本机操作员 API：仅将原 `Client` 实例的 `base` 配置为严格审计后的 owned bridge IP，仍调用以下原函数链。它不是 CLI 原生成功，也不是可接受任意 URL 的新增入口。
+
+1. 冻结源码、binary/JAR 与本机不可变镜像及来源收据；由单一操作者使用原 `launch.prepare(project, ui, output, images_path, *, here=HERE, festival=FESTIVAL)` 和 `launch.start(prepared)` 建立新 owned 部署。先完成 raw/resolved/actual 环境、挂载、网络、用户与镜像审计；不得改已 prepare 的 ownership/config 或运行中镜像。
+2. 调用 `deployed(project, root, receipts)`，重核原 source receipts、配置/材料摘要及全部容器。只对返回的 `deployment["containers"]["credit"]` 做本机 inspect；重核 ID、固定 image、owner/service/project 标签及唯一 `<project>_h03` 网络，取该网络的 IP，并验证它在已审计 expected IPAM 子网内。缺一项就 BLOCKED；不要打印完整 inspect、私有 env 或 state。
+3. 构造原 `client = Client()`，仅此实例设置 `client.base = "http://" + owned_ip + ":8091"`。记录安全的容器/镜像身份及地址来源；不修改 `Client` 类、不 monkeypatch 审计或模板 pin、不加 proxy/echo/新 runner、不停用门禁、不修改网络路由。
+4. 调用 `client.initialize()`、`client.login(password)`；密码仅从本次 deployment 的私有配置在内存读取。调用 `planning_negatives(client)`，再 `plan, selection = propose(client)`；原函数通过 MCP 执行 select/propose。调用 `client.approve(plan)`，由原登录 cookie 和确认表单取得 Run ID；Java Worker 自动领取，操作员不写 Step 或伪造结果。
+5. 用 `wait_state(deployment, run_id, {"done"}, timeout)`、`formal_receipt(state, run_id, expected_a)`、`graph_receipt(client.graph(run_id), formal)` 逐项校对；再核原 `/ui/run/<run_id>` 引用。`native_negatives(deployment, client, state, run_id)` 的拒绝探测单独计时记录。若只是 QA reader 修正，读取同一个已存在 Run，禁止再次 propose/approve 补成绩。
+6. changed 使用另一独占目录，在 prepare 前由可信操作员派生固定材料：仅 component_a 的原字节 40→41，更新其实际材料 SHA、场景引用及 profile 的材料/场景摘要；其它字节保留，记录 before/after SHA。通过 prepare 的原 `here` 参数消费该固定目录，不声称 CLI 自动生成 changed 材料。使用同一函数链实际执行后，以 `compare(baseline, changed)` 比较安全回执。
+7. UNKNOWN 是另一个显式故障负例，调用原 `unknown_check(deployment, client, password, timeout)`；只对本次 owned gateway/credit 操作。它会产生一次负例提案/Run，重启后必须恢复同一 Run，不能重建任务绕 UNKNOWN。完成后调用原 `launch.stop(project, output)` 保留卷和未决历史。不得为了重现本轮成绩重新运行已完成的项目。
+
+以上 API 步骤需要本机能直接访问已审计的 owned bridge IP；不具备该前置就 BLOCKED，不改共享网络或退回未审计地址。安全交接证据包含两组正式回执、比较、UNKNOWN restart、派生材料和镜像来源冻结；秘密只留原私有部署目录。
+
+工程主链通过后仍有明确缺项：原 WorkSwarm 宿主/插件/真实任务后台的浏览器验收、独立外部 egress/模型/银行计数、有效租约内 Commit 幂等及持久化故障窗口仍 BLOCKED/NOT_RUN。完成后 Commit 的 409 只证明原关闭租约 fence；框架 model_events=0 不证明外发为零。本轮合成材料结果不构成年报 Gold、业务 D2、生产 IAM 或发布准入。详见[整体消费交接](../../../../../docs/h03-bound-node-consumption.md)。
