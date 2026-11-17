@@ -256,7 +256,7 @@ def formal_receipt(state, run_id, expected_a):
     if len(steps) != 2 or set(run.get("order", [])) != set(steps): raise Blocked("two_original_steps_required")
     receipts = {}; calls = {}; services = set(); model_events = 0
     for node, step in steps.items():
-        call = step.get("call", {}); role = step.get("expert")
+        call = step.get("remote_call", {}); role = step.get("expert")
         if role not in ("eng.sum", "eng.reconcile") or role in receipts or step.get("status") != "done" or call.get("status") != "completed": raise Blocked("two_completed_roles_required")
         service = "h03-engineering-" + role.split(".")[1]
         if call.get("binding", {}).get("agent_id") != service or call.get("binding", {}).get("version") != "0.1.0": raise Blocked("original_role_identity_differs")
@@ -328,7 +328,7 @@ def native_negatives(deployment, client, state, run_id):
                 raise Blocked("profile_outer_debug_denial_was_not_static")
             record["debug_denial_route"] = "profile_outer_handler_404; inner build/history 403 is a separate gate"
         record["checks"][path] = code
-    node, step = next(iter(run["steps"].items())); call = step["call"]
+    node, step = next(iter(run["steps"].items())); call = step["remote_call"]
     if run.get("token"): raise Blocked("finished_original_lease_not_closed")
     body = {"run_id": run_id, "token": "expired-native-probe-token", "step": node, "node_execution_id": call["node_execution_id"], "input_digest": call["input_digest"],
             "attempt": call["attempt"], "remote_task_id": call["remote_task_id"], "context_id": call["context_id"], "output": step["output"].removeprefix("[step:" + node + "]\n")}
@@ -420,20 +420,20 @@ def unknown_check(deployment, client, password, timeout):
         if paused: launch.docker(["unpause", gateway], deployment["env"], deployment["root"])
     run, _ = original_run(before, run_id)
     if run.get("token"): raise Blocked("unknown_original_lease_must_be_closed_before_restart")
-    calls = {k: v["call"] for k, v in run["steps"].items() if v.get("call")}
+    calls = {k: v["remote_call"] for k, v in run["steps"].items() if v.get("remote_call")}
     if len(calls) != 1 or next(iter(calls.values())).get("status") != "unknown": raise Blocked("real_unknown_call_not_observed")
     snapshot = {k: {f: c.get(f) for f in ("node_execution_id", "request_id", "context_id", "input_digest", "remote_task_id")} for k, c in calls.items()}
     sends_before = sum(sum(e.get("method") == "SendMessage" for e in c.get("gateway_exchanges", {}).values()) for c in calls.values())
     restarted = restart_owned_control(deployment, client, password, timeout)
     restored, _ = original_run(state_read(deployment), run_id)
-    restored_calls = {k: v["call"] for k, v in restored["steps"].items() if v.get("call")}
+    restored_calls = {k: v["remote_call"] for k, v in restored["steps"].items() if v.get("remote_call")}
     if restored.get("status") != "waiting" or restored.get("token") or any(c.get("status") != "unknown" for c in restored_calls.values()) or {k: {f: c.get(f) for f in ("node_execution_id", "request_id", "context_id", "input_digest", "remote_task_id")} for k, c in restored_calls.items()} != snapshot:
         raise Blocked("restart_did_not_preserve_original_unknown_identity")
     code, _, _ = client.http("POST", "/api/resume", {"run": run_id, "user": "alice", "password": password})
     if code != 200: raise Blocked("original_unknown_resume_rejected")
     after = wait_state(deployment, run_id, {"waiting"}, timeout)
     latest, _ = original_run(after, run_id)
-    latest_calls = {k: v["call"] for k, v in latest["steps"].items() if v.get("call")}
+    latest_calls = {k: v["remote_call"] for k, v in latest["steps"].items() if v.get("remote_call")}
     latest_snapshot = {k: {f: c.get(f) for f in ("node_execution_id", "request_id", "context_id", "input_digest", "remote_task_id")} for k, c in latest_calls.items()}
     sends_after = sum(sum(e.get("method") == "SendMessage" for e in c.get("gateway_exchanges", {}).values()) for c in latest_calls.values())
     if snapshot != latest_snapshot or sends_before != 1 or sends_after != sends_before or any(c.get("status") != "unknown" for c in latest_calls.values()) or any(v.get("status") == "done" for v in latest["steps"].values()): raise Blocked("unknown_identity_or_no_redispatch_invariant_failed")

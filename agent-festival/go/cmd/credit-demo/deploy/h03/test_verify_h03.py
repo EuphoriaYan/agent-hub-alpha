@@ -29,7 +29,7 @@ def fixture(component=40):
         contract = binding["node_contracts"][role]
         node = verify.sha("R1", "P1-v1", role, "iteration:0")
         inputs = {"component_a": str(component), "component_b": "60", "reference": "95"} if role == "sum" else {"reference": "95", "total": str(component + 60)}
-        deps = [{"kind": "material", "id": "engineering-material-a", "sha256": "sha256:" + "d" * 64}] if role == "sum" else [{"kind": "step", "id": "sum", "node_execution_id": run["steps"]["sum"]["call"]["node_execution_id"], "artifact_digest": run["steps"]["sum"]["call"]["artifact_digest"]}]
+        deps = [{"kind": "material", "id": "engineering-material-a", "sha256": "sha256:" + "d" * 64}] if role == "sum" else [{"kind": "step", "id": "sum", "node_execution_id": run["steps"]["sum"]["remote_call"]["node_execution_id"], "artifact_digest": run["steps"]["sum"]["remote_call"]["artifact_digest"]}]
         payload = {"schema_version": "hub-bound-input/v1", "execution_binding_sha256": verify.raw_hash(binding), "node_contract_sha256": verify.raw_hash(contract), "plan_hash": plan_hash,
                    "run_id": "R1", "node_execution_id": node, "node_path": role, "attempt": 1, "fields": fields(contract["input_fields"], inputs), "dependencies": deps}
         remote = {"agent_id": "h03-engineering-" + role, "version": "0.1.0", "card_digest": "sha256:" + "c" * 64, "contract_digest": "sha256:" + "e" * 64}
@@ -41,7 +41,7 @@ def fixture(component=40):
                 "binding": remote, "context_id": "fixture-context-" + role, "remote_task_id": "fixture-task-" + role, "agent_started_at": "fixture-start", "request_id": "fixture-request-" + role,
                 "artifact_id": "fixture-artifact-" + role, "artifact_digest": verify.sha(output), "model_events": {}, "capability_token": "never_publish_capability",
                 "gateway_exchanges": {"fixture-request-" + role: {"method": "SendMessage", "outcome": "task_received", "http_status": 200}}}
-        run["steps"][role] = {"id": role, "expert": "eng." + role, "status": "done", "output": "[step:" + role + "]\n" + output, "call": call}
+        run["steps"][role] = {"id": role, "expert": "eng." + role, "status": "done", "output": "[step:" + role + "]\n" + output, "remote_call": call}
     return {"plans": {"P1": [plan]}, "runs": {"R1": run}}
 
 
@@ -111,15 +111,25 @@ class VerifierTests(unittest.TestCase):
             self.assertIn("BLOCKED", receipt["actual_role_model_bank_egress_counters"])
         with self.assertRaises(verify.Blocked): verify.formal_receipt(fixture(41), "R1", 40)
 
+    def test_persisted_step_uses_original_service_tag_and_rejects_http_call_alias(self):
+        source = (HERE.parents[1] / "service.go").read_text(encoding="utf-8")
+        self.assertRegex(source, r'Call\s+\*RemoteCall\s+`json:"remote_call,omitempty"`')
+        state = fixture()
+        verify.formal_receipt(state, "R1", 40)
+        for step in state["runs"]["R1"]["steps"].values():
+            step["call"] = step.pop("remote_call")
+        with self.assertRaises(verify.Blocked):
+            verify.formal_receipt(state, "R1", 40)
+
     def test_original_nul_digest_closure_task_context_and_duplicate_send_negatives(self):
         mutations = [lambda s: s["runs"]["R1"].update(approved_via={"channel": "fake"}),
-            lambda s: s["runs"]["R1"]["steps"]["sum"]["call"].update(input_digest="sha256:"+"0"*64),
-            lambda s: s["runs"]["R1"]["steps"]["reconcile"]["call"].update(context_id="fixture-context-sum"),
-            lambda s: s["runs"]["R1"]["steps"]["reconcile"]["call"].update(remote_task_id="fixture-task-sum"),
-            lambda s: s["runs"]["R1"]["steps"]["sum"]["call"]["gateway_exchanges"].update(duplicate={"method":"SendMessage"}),
-            lambda s: s["runs"]["R1"]["steps"]["sum"]["call"]["model_events"].update(unexpected="fixture"),
+            lambda s: s["runs"]["R1"]["steps"]["sum"]["remote_call"].update(input_digest="sha256:"+"0"*64),
+            lambda s: s["runs"]["R1"]["steps"]["reconcile"]["remote_call"].update(context_id="fixture-context-sum"),
+            lambda s: s["runs"]["R1"]["steps"]["reconcile"]["remote_call"].update(remote_task_id="fixture-task-sum"),
+            lambda s: s["runs"]["R1"]["steps"]["sum"]["remote_call"]["gateway_exchanges"].update(duplicate={"method":"SendMessage"}),
+            lambda s: s["runs"]["R1"]["steps"]["sum"]["remote_call"]["model_events"].update(unexpected="fixture"),
             lambda s: s["plans"]["P1"][0]["execution_binding"]["materials"][0].update(sha256="0"*64),
-            lambda s: s["runs"]["R1"]["steps"]["sum"]["call"].update(input=s["runs"]["R1"]["steps"]["sum"]["call"]["input"]+"\n")]
+            lambda s: s["runs"]["R1"]["steps"]["sum"]["remote_call"].update(input=s["runs"]["R1"]["steps"]["sum"]["remote_call"]["input"]+"\n")]
         for mutation in mutations:
             state = fixture(); mutation(state)
             with self.assertRaises(verify.Blocked): verify.formal_receipt(state, "R1", 40)
@@ -136,7 +146,7 @@ class VerifierTests(unittest.TestCase):
     def test_unknown_queries_preserve_identity_and_send_count_and_always_unpause(self):
         state = fixture(); run = state["runs"]["R1"]; run["status"] = "waiting"; run["steps"].pop("reconcile")
         run.pop("token")
-        run["steps"]["sum"]["status"] = "pending"; run["steps"]["sum"]["call"]["status"] = "unknown"
+        run["steps"]["sum"]["status"] = "pending"; run["steps"]["sum"]["remote_call"]["status"] = "unknown"
         deployment = {"containers": {"gateway": "a"*64}, "root": self.root, "env": {}}
         client = SimpleNamespace(approve=lambda p: "R1", http=lambda *a, **k: (200, {}, b"{}"))
         with patch.object(verify, "propose", return_value=({}, {})), patch.object(verify, "wait_state", return_value=state), patch.object(verify,"restart_owned_control",return_value={"actual":"restart-fixture-only"}) as restart, patch.object(verify,"state_read",return_value=state), patch.object(verify.launch, "docker", return_value="") as docker:
@@ -148,17 +158,17 @@ class VerifierTests(unittest.TestCase):
             with self.assertRaises(verify.Blocked): verify.unknown_check(deployment, client, "synthetic", 40)
         self.assertEqual(docker.call_args.args[0][0], "unpause")
         before = copy.deepcopy(state); after = copy.deepcopy(state)
-        after["runs"]["R1"]["steps"]["sum"]["call"]["input_digest"] = "sha256:" + "0" * 64
+        after["runs"]["R1"]["steps"]["sum"]["remote_call"]["input_digest"] = "sha256:" + "0" * 64
         with patch.object(verify, "propose", return_value=({}, {})), patch.object(verify, "wait_state", side_effect=[before, after]), patch.object(verify,"restart_owned_control",return_value={}), patch.object(verify,"state_read",return_value=before), patch.object(verify.launch, "docker", return_value=""):
             with self.assertRaises(verify.Blocked): verify.unknown_check(deployment, client, "synthetic", 40)
 
     def test_failed_or_prepared_call_is_never_reported_as_unknown_after_restart(self):
         state = fixture(); run = state["runs"]["R1"]; run["status"]="waiting";run.pop("token");run["steps"].pop("reconcile")
-        run["steps"]["sum"]["status"]="pending";run["steps"]["sum"]["call"]["status"]="unknown"
+        run["steps"]["sum"]["status"]="pending";run["steps"]["sum"]["remote_call"]["status"]="unknown"
         deployment={"containers":{"gateway":"a"*64},"root":self.root,"env":{}}
         client=SimpleNamespace(approve=lambda p:"R1",http=lambda *a,**k:(200,{},b"{}"))
         for stage,bad_status in [("restored","failed"),("latest","dispatching")]:
-            changed=copy.deepcopy(state);changed["runs"]["R1"]["steps"]["sum"]["call"]["status"]=bad_status
+            changed=copy.deepcopy(state);changed["runs"]["R1"]["steps"]["sum"]["remote_call"]["status"]=bad_status
             with patch.object(verify,"propose",return_value=({},{})),patch.object(verify,"wait_state",side_effect=[state,changed] if stage=="latest" else [state]),patch.object(verify,"restart_owned_control",return_value={}),patch.object(verify,"state_read",return_value=changed if stage=="restored" else state),patch.object(verify.launch,"docker",return_value=""):
                 with self.assertRaises(verify.Blocked):verify.unknown_check(deployment,client,"synthetic",40)
 
