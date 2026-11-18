@@ -839,7 +839,8 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	}
 	m, err := s.machine(runID)
 	if err != nil {
-		return "", err
+		s.storageErr = fmt.Errorf("%w: adoption ledger: %v", errStorage, err)
+		return "", s.storageErr
 	}
 	decision := map[string]any{"level": level, "rationale": j["rationale"], "evidence_steps": j["evidence_steps"], "case": r.CaseID}
 	digest, err := adopt.Digest(decision)
@@ -862,13 +863,22 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 		Accountability:   &ledger.Accountability{Session: r.ID, Skill: "risk-judge", Role: "customer-manager"},
 	}
 	out := m.Adopt(req)
+	if out.Failure == adopt.FailureStorage {
+		// Do not publish a replay step or grant new writes after an uncertain
+		// ledger write. Repair/reopen is required, never another model answer.
+		s.storageErr = fmt.Errorf("%w: %s", errStorage, out.Detail)
+		return "", s.storageErr
+	}
 	reqDoc := jsonDoc(req)
 	r.ReplaySteps = append(r.ReplaySteps, map[string]any{"op": "adopt", "request": reqDoc})
 	if out.Status != "adopted" && out.Status != "reused" {
 		if err := s.save(); err != nil {
 			return "", err
 		}
-		return "", fmt.Errorf("%w: adoption %s: %s", errJudgmentRejected, out.Status, out.Detail)
+		if out.Failure == adopt.FailureConflict {
+			return "", fmt.Errorf("%w: %s", errCallConflict, out.Detail)
+		}
+		return "", fmt.Errorf("%w: %s", errAdoptionRejected, out.Detail)
 	}
 	r.Decision, r.DecisionOp = decision, op
 	r.BusinessReq = req.Identity.BusinessRequestID

@@ -197,16 +197,7 @@ final class Worker implements Runnable {
                 String prompt = mj.path("judge_prompt").asText();
                 return (userInput, subGoal) -> {
                     ReActAgentMember judge = new ReActAgentMember(agent("judge-" + step, prompt, 3));
-                    String raw = judge.execute(userInput, subGoal);
-                    try {
-                        return go.judgment(run, token, step, raw);
-                    } catch (GoClient.PolicyRejectedException first) {
-                        // only a content rejection earns a revision; a lost lease, a storage
-                        // failure or a transport error is never answered by calling the model again
-                        String retry = judge.execute(userInput, subGoal + "\n\n上一次输出被规约校验拒绝：" + first.getMessage()
-                                + "\n请严格按要求只输出一个 JSON 对象。");
-                        return go.judgment(run, token, step, retry);
-                    }
+                    return judgeWithRevision(go, run, token, step, judge, userInput, subGoal);
                 };
             }
             default: {
@@ -223,6 +214,21 @@ final class Worker implements Runnable {
                 }
                 return new ReActAgentMember(agent);
             }
+        }
+    }
+
+    // Keep the revision policy in the node executor, not in the transport client.
+    static String judgeWithRevision(GoClient go, String run, String token, String step,
+            SubAgentExecutor judge, String userInput, String subGoal) {
+        String raw = judge.execute(userInput, subGoal);
+        try {
+            return go.judgment(run, token, step, raw);
+        } catch (GoClient.PolicyRejectedException first) {
+            // only a content rejection earns a revision; a lost lease, a storage
+            // failure or a transport error is never answered by calling the model again
+            String retry = judge.execute(userInput, subGoal + "\n\n上一次输出被规约校验拒绝：" + first.getMessage()
+                    + "\n请严格按要求只输出一个 JSON 对象。");
+            return go.judgment(run, token, step, retry);
         }
     }
 

@@ -28,9 +28,16 @@ final class GoClient {
         }
     }
 
-    /** The control service could not make the write durable; nothing was recorded. Not a content problem. */
+    /** Persistence is unavailable; an earlier ledger write may already exist. Repair and reconcile, not revise content. */
     static final class StorageUnavailableException extends RuntimeException {
         StorageUnavailableException(String message) {
+            super(message);
+        }
+    }
+
+    /** Framework schema/state rejection, never a reason to ask the model for different content. */
+    static final class ControlRejectedException extends RuntimeException {
+        ControlRejectedException(String message) {
             super(message);
         }
     }
@@ -77,6 +84,7 @@ final class GoClient {
                     case "FENCED" -> throw new FencedException(message);
                     case "INPUT_CONFLICT" -> throw new InputConflictException(message);
                     case "STORAGE_UNAVAILABLE" -> throw new StorageUnavailableException(message);
+                    case "CONTROL_REJECTED" -> throw new ControlRejectedException(message);
                     case "POLICY_REJECTED" -> throw new PolicyRejectedException(message);
                     case "MODEL_BINDING_MISMATCH" -> throw new BindingRejectedException(message);
                     default -> {
