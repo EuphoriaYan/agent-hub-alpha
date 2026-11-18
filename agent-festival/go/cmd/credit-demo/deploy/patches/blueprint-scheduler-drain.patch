@@ -2,8 +2,7 @@ diff --git a/common/agent-core-ext-java/agent-core-ext-orchestration/src/main/ja
 index 295b40860..40a6d957d 100644
 --- a/common/agent-core-ext-java/agent-core-ext-orchestration/src/main/java/com/openjiuwen/agents/orchestration/BlueprintScheduler.java
 +++ b/common/agent-core-ext-java/agent-core-ext-orchestration/src/main/java/com/openjiuwen/agents/orchestration/BlueprintScheduler.java
-@@ -414,6 +414,21 @@ public final class BlueprintScheduler implements AutoCloseable {
- 
+@@ -415,5 +415,20 @@ public final class BlueprintScheduler implements AutoCloseable {
      @Override
      public void close() {
 -        pool.shutdown();
