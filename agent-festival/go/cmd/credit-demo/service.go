@@ -853,7 +853,7 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	q, _ := bs.spec["question"].(map[string]any)
 	op := "op-" + r.ID
 	req := &adopt.Request{
-		AdoptionVersion: "0.1.0",
+		AdoptionVersion: "0.2.0",
 		Identity:        ledger.Identity{BusinessRequestID: "br-" + strings.ToLower(r.CaseID) + "-" + strings.ToLower(r.ID), EvaluationRevision: "er-1", OperationID: op},
 		Versions: ledger.Versions{Evidence: sha(evidence...), Rule: fmt.Sprintf("%v@%v", q["question_id"], q["spec_version"]),
 			Model: s.runModel(r), Readout: "risk-readout-1", Policy: r.PlanHash},
