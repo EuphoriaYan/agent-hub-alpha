@@ -401,6 +401,13 @@ func (s *Service) agentCall(in CallCommand) (*Run, *StepRec, error) {
 	if r == nil {
 		return nil, nil, errFenced
 	}
+	if r.Status == "blocked" {
+		// A blocked run grants no new execution start or model permit to any of
+		// its nodes; withdrawing the host lease alone does not stop remote
+		// runtimes that still hold a node credential (AR-04 review P1). Reads
+		// and audit go through other endpoints and are not affected.
+		return nil, nil, errFenced
+	}
 	st := r.Steps[in.Step]
 	if st == nil || st.Call == nil || in.Token == "" || st.Call.CapabilityToken != in.Token {
 		return nil, nil, errFenced

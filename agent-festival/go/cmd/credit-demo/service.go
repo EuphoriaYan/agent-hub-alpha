@@ -88,8 +88,10 @@ type Run struct {
 	Receipt     string              `json:"receipt,omitempty"`
 	ReceiptOf   string              `json:"receipt_status,omitempty"` // approved declined cancelled unknown
 	ReplaySteps []map[string]any    `json:"replay_steps,omitempty"`
-	Scenario    string              `json:"scenario,omitempty"`
-	Final       string              `json:"final_output,omitempty"`
+	// LeaseRefusals: executors on another model that asked for this run (AR-04 review P2).
+	LeaseRefusals []LeaseRefusal `json:"lease_refusals,omitempty"`
+	Scenario      string         `json:"scenario,omitempty"`
+	Final         string         `json:"final_output,omitempty"`
 }
 
 type State struct {
@@ -446,8 +448,10 @@ func (s *Service) Lease(worker string) (*Job, error) {
 
 // LeaseAs hands a run only to an executor whose actual model is the run's
 // bound model (AR-04 M1). An executor on another model, or one that does not
-// report its model, gets nothing: the run stops as blocked with the reason
-// before any member runs, and is never continued on the other model.
+// report its model, gets nothing for that run: the run stays queued for an
+// executor on its bound model and keeps the refusal so the projection can say
+// why it is not running. One mismatched poller is not evidence that no
+// matching executor exists, so it does not block the run (review P2).
 func (s *Service) LeaseAs(worker, executorModel string) (*Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -481,9 +485,10 @@ func (s *Service) LeaseAs(worker, executorModel string) (*Job, error) {
 			}
 		}
 		if bound := s.runModel(r); executorModel != bound {
-			s.blockRun(r, modelMismatch(bound, "执行器 "+worker, executorModel))
-			if err := s.save(); err != nil {
-				return nil, err
+			if s.noteLeaseRefusal(r, worker, executorModel, bound) {
+				if err := s.save(); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}
@@ -542,6 +547,33 @@ func modelMismatch(bound, who, actual string) string {
 		actual = "（未上报）"
 	}
 	return fmt.Sprintf("执行端模型与任务绑定不一致，已在调用模型前停止：任务绑定 %s，%s 上报 %s。不会改用其他模型继续，需人工处理。", bound, who, actual)
+}
+
+// LeaseRefusal records executors that asked for a run but run another model.
+type LeaseRefusal struct {
+	Worker string `json:"worker"`
+	Model  string `json:"model"` // what the executor reported ("" if nothing)
+	Bound  string `json:"bound"`
+	First  string `json:"first"`
+	Last   string `json:"last"`
+	Count  int    `json:"count"`
+}
+
+// noteLeaseRefusal keeps the latest refusals on the run. It reports whether a
+// new (worker, model) pair was added, so repeated polls do not rewrite state.
+// Must hold s.mu.
+func (s *Service) noteLeaseRefusal(r *Run, worker, model, bound string) bool {
+	for i := range r.LeaseRefusals {
+		if f := &r.LeaseRefusals[i]; f.Worker == worker && f.Model == model {
+			f.Last, f.Count = now(), f.Count+1
+			return false
+		}
+	}
+	r.LeaseRefusals = append(r.LeaseRefusals, LeaseRefusal{Worker: worker, Model: model, Bound: bound, First: now(), Last: now(), Count: 1})
+	if len(r.LeaseRefusals) > 20 {
+		r.LeaseRefusals = r.LeaseRefusals[len(r.LeaseRefusals)-20:]
+	}
+	return true
 }
 
 // blockRun stops a run for an operator decision and withdraws the current

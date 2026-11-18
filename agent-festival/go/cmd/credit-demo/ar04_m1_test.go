@@ -28,24 +28,29 @@ func TestAR04M1_LeaseOnlyToExecutorOnBoundModel(t *testing.T) {
 	if err != nil || job != nil {
 		t.Fatalf("executor on model-b got a job for a model-a run: %+v %v", job, err)
 	}
-	status, final := runStatus(s, r.ID)
-	if status != "blocked" || !strings.Contains(final, "model-a") || !strings.Contains(final, "model-b") {
-		t.Fatalf("run after mismatched lease: %s %q", status, final)
+	s.mu.Lock()
+	run := s.st.Runs[r.ID]
+	status, leases, refusals := run.Status, len(run.Leases), append([]LeaseRefusal(nil), run.LeaseRefusals...)
+	s.mu.Unlock()
+	if status != "queued" || leases != 0 {
+		t.Fatalf("a refused executor changed the run: status %s, leases %d", status, leases)
+	}
+	if len(refusals) != 1 || refusals[0].Worker != "worker-b" || refusals[0].Model != "model-b" || refusals[0].Bound != "model-a" {
+		t.Fatalf("refusal not recorded: %+v", refusals)
+	}
+	for i := 0; i < 3; i++ { // repeated polls are counted, not appended
+		_, _ = s.LeaseAs("worker-b", "model-b")
 	}
 	s.mu.Lock()
-	leases := len(s.st.Runs[r.ID].Leases)
+	n, count := len(s.st.Runs[r.ID].LeaseRefusals), s.st.Runs[r.ID].LeaseRefusals[0].Count
 	s.mu.Unlock()
-	if leases != 0 {
-		t.Fatalf("a lease was recorded for the refused executor: %d", leases)
-	}
-	if _, _, err := s.StepGet(r.ID, "", "intake"); err == nil {
-		t.Fatal("a step could still be started on the blocked run")
+	if n != 1 || count != 4 {
+		t.Fatalf("repeated refusals: %d entries, count %d", n, count)
 	}
 
-	// a run on the bound model is handed out, with the model it must use
-	_, r2 := e.proposeAndApprove(s)
+	// the same run goes to an executor on its bound model, with the model it must use
 	job, err = s.LeaseAs("worker-a", "model-a")
-	if err != nil || job == nil || job.RunID != r2.ID || job.Model != "model-a" {
+	if err != nil || job == nil || job.RunID != r.ID || job.Model != "model-a" {
 		t.Fatalf("executor on the bound model: %+v %v", job, err)
 	}
 }
@@ -57,9 +62,25 @@ func TestAR04M1_ExecutorThatDoesNotReportItsModelIsRefused(t *testing.T) {
 	if job, err := s.LeaseAs("legacy", ""); err != nil || job != nil {
 		t.Fatalf("legacy executor without a model got a job: %+v %v", job, err)
 	}
-	if status, final := runStatus(s, r.ID); status != "blocked" || !strings.Contains(final, "未上报") {
-		t.Fatalf("legacy executor: %s %q", status, final)
+	s.mu.Lock()
+	run := s.st.Runs[r.ID]
+	status, refusals := run.Status, run.LeaseRefusals
+	s.mu.Unlock()
+	if status != "queued" || len(refusals) != 1 || refusals[0].Model != "" {
+		t.Fatalf("legacy executor: status %s refusals %+v", status, refusals)
 	}
+	if g, err := s.graph(mustPlan(t, s, r), false); err != nil || g.Run == nil || g.Run.Waiting == "" {
+		t.Fatalf("projection does not say why the run waits: %+v %v", g, err)
+	}
+}
+
+func mustPlan(t *testing.T, s *Service, r *Run) *Plan {
+	t.Helper()
+	p, ok := s.Plan(r.PlanID, r.PlanVersion)
+	if !ok {
+		t.Fatal("no plan")
+	}
+	return p
 }
 
 // m1RemoteCall leases on the bound model and opens a remote call for intake.
@@ -163,7 +184,7 @@ func TestAR04M2_NewRunsUseTheNewModelOldRunsAreNotMoved(t *testing.T) {
 	if err != nil || job == nil || job.RunID != fresh.ID {
 		t.Fatalf("model-b executor did not get the model-b run: %+v %v", job, err)
 	}
-	if status, final := runStatus(s, old.ID); status != "blocked" || !strings.Contains(final, "model-a") {
-		t.Fatalf("model-a run on a model-b executor: %s %q", status, final)
+	if status, _ := runStatus(s, old.ID); status != "queued" {
+		t.Fatalf("model-a run on a model-b executor: %s, want it left queued for a model-a executor", status)
 	}
 }
