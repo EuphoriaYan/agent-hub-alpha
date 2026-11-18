@@ -166,6 +166,9 @@ func OpenService(cfg Config) (*Service, error) {
 	}
 	s.lastSaved, _ = json.Marshal(s.st)
 	s.writeState = writeJSON
+	if err := s.reconcileAdoptions(); err != nil {
+		return nil, fmt.Errorf("persist startup reconciliation: %w", err)
+	}
 	s.bank = NewProvider(func(string, string, string) {})
 	s.bank.TerminalDelay = 4 * time.Second
 	return s, nil
@@ -810,6 +813,10 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	st := r.Steps[step]
+	if st == nil || expertByID(st.Expert) == nil || expertByID(st.Expert).Kind != "judge" || st.Call != nil {
+		return "", fmt.Errorf("%w: not a local judgment node", errAdoptionRejected)
+	}
 	bs, err := s.runSpec(r)
 	if err != nil {
 		return "", err
@@ -882,13 +889,15 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	}
 	r.Decision, r.DecisionOp = decision, op
 	r.BusinessReq = req.Identity.BusinessRequestID
-	if st := r.Steps[step]; st != nil {
-		st.Activity = "判断已采纳：" + level
-	}
+	output := judgmentOutput(decision)
+	// Publish the adopted value and the reusable node result in one snapshot.
+	// The executor's later StepPut is idempotent, including a lost HTTP reply.
+	st.Activity = "判断已采纳：" + level
+	st.Status, st.Output, st.FinishedAt = "done", "[step:"+step+"]\n"+output, now()
 	if err := s.save(); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("DECISION=%s\n依据：%v\n证据步骤：%v", strings.ToUpper(level), j["rationale"], j["evidence_steps"]), nil
+	return output, nil
 }
 
 func (s *Service) record(r *Run, op string, extra map[string]any) {
