@@ -816,11 +816,11 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 	}
 	j, err := extractJSON(raw)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %v", errJudgmentRejected, err)
 	}
 	level := fmt.Sprint(j["level"])
 	if !contains(bs.levels, level) {
-		return "", fmt.Errorf("level %q is not one of %v", level, bs.levels)
+		return "", fmt.Errorf("%w: level %q is not one of %v", errJudgmentRejected, level, bs.levels)
 	}
 	var evidence []string
 	if ev, ok := j["evidence_steps"].([]any); ok {
@@ -829,17 +829,18 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 			id = strings.TrimPrefix(id, "step:")
 			st, ok := r.Steps[id]
 			if !ok || st.Status != "done" {
-				return "", fmt.Errorf("evidence step %q did not run in this case", id)
+				return "", fmt.Errorf("%w: evidence step %q did not run in this case", errJudgmentRejected, id)
 			}
 			evidence = append(evidence, id+"="+st.Output)
 		}
 	}
 	if len(evidence) == 0 {
-		return "", fmt.Errorf("evidence_steps is empty")
+		return "", fmt.Errorf("%w: evidence_steps is empty", errJudgmentRejected)
 	}
 	m, err := s.machine(runID)
 	if err != nil {
-		return "", err
+		s.storageErr = fmt.Errorf("%w: adoption ledger: %v", errStorage, err)
+		return "", s.storageErr
 	}
 	decision := map[string]any{"level": level, "rationale": j["rationale"], "evidence_steps": j["evidence_steps"], "case": r.CaseID}
 	digest, err := adopt.Digest(decision)
@@ -862,13 +863,22 @@ func (s *Service) Judgment(runID, token, step, raw string) (string, error) {
 		Accountability:   &ledger.Accountability{Session: r.ID, Skill: "risk-judge", Role: "customer-manager"},
 	}
 	out := m.Adopt(req)
+	if out.Failure == adopt.FailureStorage {
+		// Do not publish a replay step or grant new writes after an uncertain
+		// ledger write. Repair/reopen is required, never another model answer.
+		s.storageErr = fmt.Errorf("%w: %s", errStorage, out.Detail)
+		return "", s.storageErr
+	}
 	reqDoc := jsonDoc(req)
 	r.ReplaySteps = append(r.ReplaySteps, map[string]any{"op": "adopt", "request": reqDoc})
 	if out.Status != "adopted" && out.Status != "reused" {
 		if err := s.save(); err != nil {
 			return "", err
 		}
-		return "", fmt.Errorf("adoption %s: %s", out.Status, out.Detail)
+		if out.Failure == adopt.FailureConflict {
+			return "", fmt.Errorf("%w: %s", errCallConflict, out.Detail)
+		}
+		return "", fmt.Errorf("%w: %s", errAdoptionRejected, out.Detail)
 	}
 	r.Decision, r.DecisionOp = decision, op
 	r.BusinessReq = req.Identity.BusinessRequestID
