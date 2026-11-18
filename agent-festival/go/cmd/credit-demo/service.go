@@ -23,18 +23,20 @@ import (
 )
 
 type Config struct {
-	Addr             string
-	DataDir          string
-	OrchestratorURL  string
-	PublicURL        string   // where browsers reach this service: a path behind the front proxy, e.g. /credit
-	Origins          []string // browser origins of the WorkSwarm UI; the MCP App may fetch /api/graph from them
-	MemberMCPURL     string
-	Model            string
-	SpecPath         string
-	LeaseSeconds     int
-	BusRegistryURL   string
-	BusRegistryToken string
-	BusTenant        string
+	BuilderHubEnabled  bool
+	BuilderPublication *builderPublicationConfig
+	Addr               string
+	DataDir            string
+	OrchestratorURL    string
+	PublicURL          string   // where browsers reach this service: a path behind the front proxy, e.g. /credit
+	Origins            []string // browser origins of the WorkSwarm UI; the MCP App may fetch /api/graph from them
+	MemberMCPURL       string
+	Model              string
+	SpecPath           string
+	LeaseSeconds       int
+	BusRegistryURL     string
+	BusRegistryToken   string
+	BusTenant          string
 }
 
 // StepRec is the authoritative record of one blueprint step in a run.
