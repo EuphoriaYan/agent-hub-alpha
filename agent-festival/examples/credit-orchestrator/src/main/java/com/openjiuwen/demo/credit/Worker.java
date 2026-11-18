@@ -63,7 +63,7 @@ final class Worker implements Runnable {
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                JsonNode job = go.lease(worker);
+                JsonNode job = go.lease(worker, modelName());
                 if (job == null) {
                     continue;
                 }
@@ -78,6 +78,14 @@ final class Worker implements Runnable {
     private void execute(JsonNode job) {
         String run = job.path("run_id").asText();
         String token = job.path("token").asText();
+        String bound = job.path("model").asText();
+        if (!bound.equals(modelName())) {
+            // The control service hands out only runs bound to the model we reported;
+            // never run a member on another model than the run's binding (AR-04 M1).
+            LOG.error("run {}: bound model {} but this executor calls {}; not executing", run, bound, modelName());
+            go.done(run, token, List.of(), null, "MODEL_BINDING_MISMATCH: run bound to " + bound + ", executor model " + modelName());
+            return;
+        }
         LOG.info("run {} leased (epoch {})", run, job.path("epoch").asInt());
         AtomicBoolean fenced = new AtomicBoolean();
         ScheduledExecutorService beat = Executors.newSingleThreadScheduledExecutor();
@@ -256,13 +264,18 @@ final class Worker implements Runnable {
                 .timeout(120.0)
                 .build();
         ModelRequestConfig request = ModelRequestConfig.builder()
-                .modelName(first("MODEL_NAME", "SWARM_MODEL_NAME"))
+                .modelName(modelName())
                 .temperature(0.1)
                 .topP(0.95)
                 .maxTokens(2000)
                 .build();
         agent.setLlm(new Model(client, request));
         return agent;
+    }
+
+    /** The model this executor actually calls; reported at lease and checked against the run's binding. */
+    private String modelName() {
+        return first("MODEL_NAME", "SWARM_MODEL_NAME");
     }
 
     private String first(String... keys) {

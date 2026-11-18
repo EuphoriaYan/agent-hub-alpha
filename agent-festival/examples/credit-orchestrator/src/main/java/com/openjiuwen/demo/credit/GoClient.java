@@ -56,8 +56,9 @@ final class GoClient {
         }
     }
 
-    JsonNode lease(String worker) {
-        return post("/exec/lease", Map.of("worker", worker), 30);
+    /** Leases a run; the executor reports the model it will actually call (AR-04 M1). */
+    JsonNode lease(String worker, String model) {
+        return post("/exec/lease", Map.of("worker", worker, "model", model), 30);
     }
 
     void heartbeat(String run, String token) {

@@ -68,6 +68,9 @@ type Plan struct {
 	ApprovedBy  string                `json:"approved_by,omitempty"`
 	RunID       string                `json:"run_id,omitempty"`
 	BusBindings map[string]BusBinding `json:"bus_bindings,omitempty"`
+	// Binding is the judgment spec and execution config the plan was proposed
+	// under; the approval digest covers it (AR-04).
+	Binding *ExecBinding `json:"exec_binding,omitempty"`
 }
 
 func (p *Plan) Key() string { return fmt.Sprintf("%s-v%d", p.ID, p.Version) }
@@ -376,7 +379,11 @@ func planHash(p *Plan, contractHashes map[string]string) string {
 			members[a.ID].(map[string]any)["bus_binding"] = b
 		}
 	}
-	raw, _ := rfc8785.Canonicalize(jsonDoc(map[string]any{"case": p.CaseID, "goal": p.Goal, "spec_digest": p.SpecDigest, "members": members}))
+	doc := map[string]any{"case": p.CaseID, "goal": p.Goal, "spec_digest": p.SpecDigest, "members": members}
+	if p.Binding != nil {
+		doc["exec_binding"] = p.Binding
+	}
+	raw, _ := rfc8785.Canonicalize(jsonDoc(doc))
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

@@ -54,6 +54,7 @@ type RemoteCall struct {
 	ArtifactID       string                     `json:"artifact_id,omitempty"`
 	ArtifactDigest   string                     `json:"artifact_digest,omitempty"`
 	ModelEvents      map[string]string          `json:"model_events"`
+	ActualModels     map[string]string          `json:"actual_models,omitempty"` // model event id -> model the runtime reported
 	Discovery        *DiscoverySnapshot         `json:"discovery,omitempty"`
 	GatewayExchanges map[string]GatewayExchange `json:"gateway_exchanges,omitempty"`
 	// This scoped credential is persisted privately and never projected to UI.
@@ -79,6 +80,7 @@ type CallCommand struct {
 	ServiceVersion  string           `json:"service_version,omitempty"`
 	EventID         string           `json:"event_id,omitempty"`
 	Gateway         *GatewayExchange `json:"gateway,omitempty"`
+	Model           string           `json:"model,omitempty"` // the model the remote runtime is about to call
 }
 
 var errCallConflict = errors.New("node input, contract or result conflict")
@@ -282,7 +284,7 @@ func (s *Service) beginCheck(in CallCommand) (map[string]any, *beginSnapshot, er
 	if !ok {
 		return nil, nil, fmt.Errorf("node has no approved remote capability")
 	}
-	digest, err := canonicalHash(map[string]any{"input": in.Input, "goal": in.Goal, "binding": binding, "model": s.cfg.Model})
+	digest, err := canonicalHash(map[string]any{"input": in.Input, "goal": in.Goal, "binding": binding, "model": s.runModel(r)})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -446,6 +448,13 @@ func (s *Service) agentCall(in CallCommand) (*Run, *StepRec, error) {
 	if r == nil {
 		return nil, nil, errFenced
 	}
+	if r.Status == "blocked" {
+		// A blocked run grants no new execution start or model permit to any of
+		// its nodes; withdrawing the host lease alone does not stop remote
+		// runtimes that still hold a node credential (AR-04 review P1). Reads
+		// and audit go through other endpoints and are not affected.
+		return nil, nil, errFenced
+	}
 	st := r.Steps[in.Step]
 	if st == nil || st.Call == nil || in.Token == "" || st.Call.CapabilityToken != in.Token {
 		return nil, nil, errFenced
@@ -459,7 +468,7 @@ func (s *Service) agentCall(in CallCommand) (*Run, *StepRec, error) {
 func (s *Service) AgentContext(in CallCommand) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, st, err := s.agentCall(in)
+	r, st, err := s.agentCall(in)
 	if err != nil {
 		return nil, err
 	}
@@ -474,23 +483,40 @@ func (s *Service) AgentContext(in CallCommand) (map[string]any, error) {
 	if err := s.save(); err != nil {
 		return nil, err
 	}
-	return map[string]any{"call": copyCall(c), "expert": st.Expert, "tools": expertByID(st.Expert).Tools}, nil
+	return map[string]any{"call": copyCall(c), "expert": st.Expert, "tools": expertByID(st.Expert).Tools, "model": s.runModel(r)}, nil
 }
 
+// ModelCall is the remote runtime's record of a model call, made before the
+// call. The runtime reports the model it is about to use; anything but the
+// run's bound model stops the run as blocked and is refused, so the call is
+// not made (AR-04 M1).
 func (s *Service) ModelCall(in CallCommand) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, st, err := s.agentCall(in)
+	r, st, err := s.agentCall(in)
 	if err != nil {
 		return err
 	}
 	if in.EventID == "" || len(in.EventID) > 150 {
 		return fmt.Errorf("model event id required")
 	}
+	if bound := s.runModel(r); in.Model != bound {
+		reason := modelMismatch(bound, "远端 "+in.ServiceID, in.Model)
+		st.Call.Reason = reason
+		s.blockRun(r, reason)
+		if err := s.save(); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: %s", errModelBinding, reason)
+	}
 	if st.Call.ModelEvents[in.EventID] != "" {
 		return nil
 	}
 	st.Call.ModelEvents[in.EventID] = now()
+	if st.Call.ActualModels == nil {
+		st.Call.ActualModels = map[string]string{}
+	}
+	st.Call.ActualModels[in.EventID] = in.Model
 	return s.save()
 }
 
@@ -539,7 +565,7 @@ func (s *Service) busRoutes(mux *http.ServeMux) {
 			w.Header().Set("Content-Type", "application/json")
 			if err != nil {
 				status := http.StatusBadRequest
-				if errors.Is(err, errFenced) || errors.Is(err, errCallConflict) {
+				if errors.Is(err, errFenced) || errors.Is(err, errCallConflict) || errors.Is(err, errModelBinding) {
 					status = http.StatusConflict
 				}
 				if errors.Is(err, errStorage) {
